@@ -212,7 +212,7 @@ for f in sorted(os.listdir(d)):
             if line and not line.startswith('#') and '=' in line:
                 k, v = line.split('=', 1)
                 env[k.strip()] = v.strip()
-    models.append({{'name': name, 'model': env.get('VLLM_MODEL', ''), 'port': env.get('VLLM_PORT', '8000'), 'served_name': env.get('VLLM_SERVED_MODEL_NAME', name)}})
+    models.append({{'name': name, 'model': env.get('VLLM_MODEL', ''), 'port': env.get('VLLM_PORT', '8000'), 'served_name': env.get('VLLM_SERVED_MODEL_NAME', name), 'which_gpu': int(env.get('VLLM_WHICH_GPU', '0')), 'memory_utilization': float(env.get('VLLM_GPU_MEMORY_UTILIZATION', '0.85'))}})
 print(json.dumps(models))
 " """
 

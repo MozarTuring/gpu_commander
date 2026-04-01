@@ -313,68 +313,148 @@ function escapeHtml(str) {
 // ---------------------------------------------------------------------------
 // LLM Services
 // ---------------------------------------------------------------------------
+let _llmModels = [];      // fetched once from first vllm machine
+let _llmRunning = {};     // { machineName: [...containers] }
+
 async function loadLLMTab() {
     const grid = document.getElementById('llmGrid');
-    const llmMachines = machines.filter(m => m.vllm_service_dir && m.online);
+    const llmMachines = machines.filter(m => m.vllm_service_dir);
 
     if (llmMachines.length === 0) {
-        grid.innerHTML = '<div class="empty-state">No online machines with LLM services configured</div>';
+        grid.innerHTML = '<div class="empty-state">No machines with LLM services configured</div>';
         return;
     }
 
-    for (const m of llmMachines) {
-        let section = document.getElementById(`llm-section-${m.name}`);
-        if (!section) {
-            section = document.createElement('div');
-            section.id = `llm-section-${m.name}`;
-            section.className = 'cmd-panel';
-            section.style.marginBottom = '20px';
-            grid.appendChild(section);
-        }
+    // Fetch models from first online vllm machine (same repo on all machines)
+    const sourceMachine = llmMachines.find(m => m.online);
+    if (sourceMachine && _llmModels.length === 0) {
+        _llmModels = await api(`/api/machines/${sourceMachine.name}/llm/models`).catch(() => []);
+    }
 
-        const [models, running] = await Promise.all([
-            api(`/api/machines/${m.name}/llm/models`).catch(() => []),
-            api(`/api/machines/${m.name}/llm/running`).catch(() => []),
-        ]);
+    // Fetch running containers for all machines in parallel
+    const runningResults = await Promise.all(
+        llmMachines.map(m => m.online
+            ? api(`/api/machines/${m.name}/llm/running`).then(r => [m.name, r]).catch(() => [m.name, []])
+            : Promise.resolve([m.name, []])
+        )
+    );
+    runningResults.forEach(([name, containers]) => { _llmRunning[name] = containers; });
 
-        const runningHtml = running.length === 0
-            ? '<div style="color:var(--text-dim); font-size:13px">No running containers</div>'
-            : `<table class="task-table"><thead><tr><th>Container</th><th>Status</th><th>Ports</th></tr></thead><tbody>
-                ${running.map(c => `<tr>
-                    <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
-                    <td style="font-size:12px">${escapeHtml(c.status)}</td>
-                    <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
-                </tr>`).join('')}
-               </tbody></table>`;
+    grid.innerHTML = '';
 
-        const modelOptions = models.map(m =>
-            `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)} — ${escapeHtml(m.model)} (port ${m.port})</option>`
-        ).join('');
+    // Deploy panel
+    const deployPanel = document.createElement('div');
+    deployPanel.className = 'cmd-panel';
+    deployPanel.style.marginBottom = '20px';
+    deployPanel.innerHTML = renderDeployPanel(llmMachines);
+    grid.appendChild(deployPanel);
 
-        section.innerHTML = `
-            <h3 style="margin-bottom:14px">${m.name}</h3>
-            <div style="margin-bottom:14px">
-                <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; text-transform:uppercase; letter-spacing:.05em">Running</div>
-                ${runningHtml}
-            </div>
-            <div>
-                <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; text-transform:uppercase; letter-spacing:.05em">Deploy</div>
-                <div class="cmd-row">
-                    <select id="llm-model-${m.name}">${modelOptions}</select>
-                    <button id="llm-deploy-${m.name}" onclick="deployLLM('${m.name}')">Deploy</button>
-                </div>
-                <div class="cmd-output" id="llm-output-${m.name}" style="display:none; margin-top:10px"></div>
-            </div>
-        `;
+    // Per-machine running services
+    const runningPanel = document.createElement('div');
+    runningPanel.className = 'cmd-panel';
+    runningPanel.innerHTML = `
+        <h3 style="margin-bottom:14px">Running Services</h3>
+        ${llmMachines.map(m => renderRunningSection(m)).join('')}
+    `;
+    grid.appendChild(runningPanel);
+
+    // Wire up model select -> update machine table
+    const modelSel = document.getElementById('llm-model-select');
+    if (modelSel) {
+        modelSel.addEventListener('change', () => updateMachineTable(llmMachines));
+        updateMachineTable(llmMachines);
     }
 }
 
-async function deployLLM(machineName) {
-    const select = document.getElementById(`llm-model-${machineName}`);
-    const btn = document.getElementById(`llm-deploy-${machineName}`);
-    const output = document.getElementById(`llm-output-${machineName}`);
-    const model = select.value;
-    if (!model) return;
+function renderDeployPanel(llmMachines) {
+    const modelOptions = _llmModels.map(m =>
+        `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)} — ${escapeHtml(m.model)}</option>`
+    ).join('');
+
+    const machineOptions = llmMachines.map(m =>
+        `<option value="${escapeHtml(m.name)}"${!m.online ? ' disabled' : ''}>${escapeHtml(m.name)}${m.online ? '' : ' (offline)'}</option>`
+    ).join('');
+
+    return `
+        <h3 style="margin-bottom:14px">Deploy Model</h3>
+        <div class="cmd-row" style="margin-bottom:12px">
+            <select id="llm-model-select" style="flex:2">${modelOptions}</select>
+        </div>
+        <div id="llm-machine-table" style="margin-bottom:12px"></div>
+        <div class="cmd-row">
+            <select id="llm-machine-select">${machineOptions}</select>
+            <button id="llm-deploy-btn" onclick="deployLLM()">Deploy</button>
+        </div>
+        <div class="cmd-output" id="llm-output" style="display:none; margin-top:10px"></div>
+    `;
+}
+
+function updateMachineTable(llmMachines) {
+    const modelSel = document.getElementById('llm-model-select');
+    const machineSel = document.getElementById('llm-machine-select');
+    const tableDiv = document.getElementById('llm-machine-table');
+    if (!modelSel || !tableDiv) return;
+
+    const model = _llmModels.find(m => m.name === modelSel.value);
+    if (!model) { tableDiv.innerHTML = ''; return; }
+
+    const whichGpu = model.which_gpu ?? 0;
+    const memUtil = model.memory_utilization ?? 0.85;
+
+    let bestMachine = null;
+    let bestFree = -1;
+
+    const rows = llmMachines.map(m => {
+        if (!m.online) return { name: m.name, status: 'offline', gpuIdx: whichGpu, required: null, free: null, fits: false };
+
+        const gpu = m.gpu_cache?.gpus?.[whichGpu];
+        if (!gpu) return { name: m.name, status: 'no gpu data', gpuIdx: whichGpu, required: null, free: null, fits: false };
+
+        const required = Math.round(memUtil * gpu.memory_total_mib);
+        const free = gpu.memory_free_mib;
+        const fits = free >= required;
+
+        if (fits && free > bestFree) { bestFree = free; bestMachine = m.name; }
+        return { name: m.name, status: fits ? 'fits' : 'no fit', gpuIdx: whichGpu, required, free, fits };
+    });
+
+    tableDiv.innerHTML = `<table class="task-table"><thead><tr>
+        <th>Machine</th><th>GPU</th><th>Required</th><th>Free</th><th>Status</th>
+    </tr></thead><tbody>${rows.map(r => `<tr>
+        <td>${escapeHtml(r.name)}</td>
+        <td style="font-family:var(--mono)">${r.gpuIdx}</td>
+        <td style="font-family:var(--mono)">${r.required != null ? r.required + ' MiB' : '—'}</td>
+        <td style="font-family:var(--mono); color:${r.free != null ? (r.fits ? 'var(--green)' : 'var(--red)') : 'inherit'}">${r.free != null ? r.free + ' MiB' : '—'}</td>
+        <td><span class="task-status ${r.fits ? 'completed' : r.status === 'offline' ? 'cancelled' : 'failed'}">${r.status}</span></td>
+    </tr>`).join('')}</tbody></table>`;
+
+    // Auto-select best machine
+    if (bestMachine && machineSel) machineSel.value = bestMachine;
+}
+
+function renderRunningSection(m) {
+    const containers = _llmRunning[m.name] || [];
+    const rowsHtml = containers.length === 0
+        ? `<div style="color:var(--text-dim); font-size:13px; margin-bottom:12px">No running containers</div>`
+        : `<table class="task-table" style="margin-bottom:12px"><thead><tr><th>Container</th><th>Status</th><th>Ports</th></tr></thead><tbody>
+            ${containers.map(c => `<tr>
+                <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
+                <td style="font-size:12px">${escapeHtml(c.status)}</td>
+                <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
+            </tr>`).join('')}
+           </tbody></table>`;
+    return `<div style="margin-bottom:12px">
+        <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em">${escapeHtml(m.name)}</div>
+        ${rowsHtml}
+    </div>`;
+}
+
+async function deployLLM() {
+    const model = document.getElementById('llm-model-select')?.value;
+    const machineName = document.getElementById('llm-machine-select')?.value;
+    const btn = document.getElementById('llm-deploy-btn');
+    const output = document.getElementById('llm-output');
+    if (!model || !machineName) return;
 
     btn.disabled = true;
     output.style.display = 'block';
@@ -385,7 +465,7 @@ async function deployLLM(machineName) {
             method: 'POST',
             body: JSON.stringify({ model }),
         });
-        output.textContent = `Task submitted — ID: ${task.id}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
+        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${machineName}\nModel: ${model}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
     } catch (err) {
         output.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
     } finally {
