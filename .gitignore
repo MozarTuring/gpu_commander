@@ -1,1 +1,5 @@
 **/zzzjwmresources
+.venv/
+__pycache__/
+*.pyc
+agent/agent.log
