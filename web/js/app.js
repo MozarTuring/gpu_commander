@@ -684,6 +684,18 @@ function updateUserDisplay() {
     const badge = document.getElementById('userBadge');
     badge.textContent = `${_currentUser.username} · ${_currentUser.role}`;
     menu.style.display = 'flex';
+
+    const adminOnly = ['overview', 'execute', 'tasks'];
+    adminOnly.forEach(tab => {
+        const btn = document.querySelector(`.tab[data-tab="${tab}"]`);
+        if (btn) btn.style.display = _currentUser.role === 'admin' ? '' : 'none';
+    });
+
+    // If current tab is now hidden, switch to llm
+    const activeTab = document.querySelector('.tab.active');
+    if (activeTab && adminOnly.includes(activeTab.dataset.tab) && _currentUser.role !== 'admin') {
+        document.querySelector('.tab[data-tab="llm"]').click();
+    }
 }
 
 async function login() {
