@@ -1,1 +1,0 @@
-cd /Users/maojingwei/baidu/project/ && source common_tools/meta_script.sh custodian2ferragon gpu_commander remote_

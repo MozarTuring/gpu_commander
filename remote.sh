@@ -104,3 +104,9 @@ else
     echo "WARNING: Coordinator may not have started. Check ${PROJ_DIR}/coordinator.log"
     tail -20 "${PROJ_DIR}/coordinator.log" 2>/dev/null || true
 fi
+
+if false; then
+
+cd /Users/maojingwei/baidu/project/ && source common_tools/meta_script.sh custodian2ferragon gpu_commander remote_
+
+fi
