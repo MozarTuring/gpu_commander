@@ -363,10 +363,16 @@ async function loadLLMTab() {
     `;
     grid.appendChild(runningPanel);
 
-    // Wire up model select -> update machine table
+    // Restore previously selected model (survives poll refreshes)
     const modelSel = document.getElementById('llm-model-select');
     if (modelSel) {
-        modelSel.addEventListener('change', () => updateMachineTable(llmMachines));
+        if (_selectedModel && modelSel.querySelector(`option[value="${CSS.escape(_selectedModel)}"]`)) {
+            modelSel.value = _selectedModel;
+        }
+        modelSel.addEventListener('change', () => {
+            _selectedModel = modelSel.value;
+            updateMachineTable(llmMachines);
+        });
         updateMachineTable(llmMachines);
     }
 }
@@ -391,6 +397,7 @@ function renderDeployPanel(llmMachines) {
 
 let _bestMachine = null;
 let _bestGpu = null;
+let _selectedModel = null;
 
 function updateMachineTable(llmMachines) {
     const modelSel = document.getElementById('llm-model-select');
