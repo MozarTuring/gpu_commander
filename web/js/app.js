@@ -11,6 +11,8 @@ document.querySelectorAll('.tab').forEach(btn => {
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         btn.classList.add('active');
         document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+        if (btn.dataset.tab === 'llm') loadLLMTab();
+        if (btn.dataset.tab === 'tasks') loadTasks();
     });
 });
 
@@ -295,6 +297,7 @@ function startPolling(interval = 10000) {
         refresh();
         const activeTab = document.querySelector('.tab.active')?.dataset.tab;
         if (activeTab === 'tasks') loadTasks();
+        if (activeTab === 'llm') loadLLMTab();
     }, interval);
 }
 
@@ -305,6 +308,89 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+}
+
+// ---------------------------------------------------------------------------
+// LLM Services
+// ---------------------------------------------------------------------------
+async function loadLLMTab() {
+    const grid = document.getElementById('llmGrid');
+    const llmMachines = machines.filter(m => m.vllm_service_dir && m.online);
+
+    if (llmMachines.length === 0) {
+        grid.innerHTML = '<div class="empty-state">No online machines with LLM services configured</div>';
+        return;
+    }
+
+    for (const m of llmMachines) {
+        let section = document.getElementById(`llm-section-${m.name}`);
+        if (!section) {
+            section = document.createElement('div');
+            section.id = `llm-section-${m.name}`;
+            section.className = 'cmd-panel';
+            section.style.marginBottom = '20px';
+            grid.appendChild(section);
+        }
+
+        const [models, running] = await Promise.all([
+            api(`/api/machines/${m.name}/llm/models`).catch(() => []),
+            api(`/api/machines/${m.name}/llm/running`).catch(() => []),
+        ]);
+
+        const runningHtml = running.length === 0
+            ? '<div style="color:var(--text-dim); font-size:13px">No running containers</div>'
+            : `<table class="task-table"><thead><tr><th>Container</th><th>Status</th><th>Ports</th></tr></thead><tbody>
+                ${running.map(c => `<tr>
+                    <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
+                    <td style="font-size:12px">${escapeHtml(c.status)}</td>
+                    <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
+                </tr>`).join('')}
+               </tbody></table>`;
+
+        const modelOptions = models.map(m =>
+            `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)} — ${escapeHtml(m.model)} (port ${m.port})</option>`
+        ).join('');
+
+        section.innerHTML = `
+            <h3 style="margin-bottom:14px">${m.name}</h3>
+            <div style="margin-bottom:14px">
+                <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; text-transform:uppercase; letter-spacing:.05em">Running</div>
+                ${runningHtml}
+            </div>
+            <div>
+                <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; text-transform:uppercase; letter-spacing:.05em">Deploy</div>
+                <div class="cmd-row">
+                    <select id="llm-model-${m.name}">${modelOptions}</select>
+                    <button id="llm-deploy-${m.name}" onclick="deployLLM('${m.name}')">Deploy</button>
+                </div>
+                <div class="cmd-output" id="llm-output-${m.name}" style="display:none; margin-top:10px"></div>
+            </div>
+        `;
+    }
+}
+
+async function deployLLM(machineName) {
+    const select = document.getElementById(`llm-model-${machineName}`);
+    const btn = document.getElementById(`llm-deploy-${machineName}`);
+    const output = document.getElementById(`llm-output-${machineName}`);
+    const model = select.value;
+    if (!model) return;
+
+    btn.disabled = true;
+    output.style.display = 'block';
+    output.innerHTML = '<span class="spinner"></span> Submitting deploy task...';
+
+    try {
+        const task = await api(`/api/machines/${machineName}/llm/deploy`, {
+            method: 'POST',
+            body: JSON.stringify({ model }),
+        });
+        output.textContent = `Task submitted — ID: ${task.id}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
+    } catch (err) {
+        output.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 // ---------------------------------------------------------------------------

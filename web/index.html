@@ -19,6 +19,7 @@
     <div class="container">
         <div class="tabs">
             <button class="tab active" data-tab="overview">Overview</button>
+            <button class="tab" data-tab="llm">LLM Services</button>
             <button class="tab" data-tab="execute">Execute</button>
             <button class="tab" data-tab="tasks">Task Queue</button>
         </div>
@@ -26,6 +27,11 @@
         <!-- Overview Tab -->
         <div id="tab-overview" class="tab-content active">
             <div class="machines-grid" id="machinesGrid"></div>
+        </div>
+
+        <!-- LLM Services Tab -->
+        <div id="tab-llm" class="tab-content">
+            <div id="llmGrid"></div>
         </div>
 
         <!-- Execute Tab -->

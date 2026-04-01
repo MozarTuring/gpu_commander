@@ -13,6 +13,7 @@ class MachineConfig:
     ssh_alias: str
     remote_dir: str
     description: str = ""
+    vllm_service_dir: str = ""
 
     @property
     def base_url(self) -> str:
@@ -60,6 +61,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
             ssh_alias=m.get("ssh_alias", m["host"]),
             remote_dir=m.get("remote_dir", "/tmp/gpu_commander_agent"),
             description=m.get("description", ""),
+            vllm_service_dir=m.get("vllm_service_dir", ""),
         )
 
     return AppConfig(coordinator=coordinator, auth_token=auth_token, machines=machines)

@@ -1,6 +1,7 @@
 """GPU Commander Coordinator — central server running on your Mac."""
 
 import asyncio
+import json
 import time
 from pathlib import Path
 
@@ -82,6 +83,7 @@ async def list_machines():
             "host": m.host,
             "agent_port": m.agent_port,
             "description": m.description,
+            "vllm_service_dir": m.vllm_service_dir,
             "online": _machine_online.get(name, False),
             "gpu_cache": _gpu_cache.get(name),
             "gpu_cache_age": time.time() - _gpu_cache_ts.get(name, 0)
@@ -187,6 +189,83 @@ async def get_task(name: str, task_id: str):
 async def cancel_task(name: str, task_id: str):
     m = _get_machine(name)
     return await _agent_request(m, "DELETE", f"/tasks/{task_id}")
+
+
+# ---------------------------------------------------------------------------
+# LLM Services
+# ---------------------------------------------------------------------------
+
+_LIST_MODELS_CMD = """python3 -c "
+import os, json
+d = '{vllm_dir}'
+models = []
+for f in sorted(os.listdir(d)):
+    if not f.endswith('.env'):
+        continue
+    name = f[:-4]
+    env = {{}}
+    with open(os.path.join(d, f)) as fp:
+        for line in fp:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                k, v = line.split('=', 1)
+                env[k.strip()] = v.strip()
+    models.append({{'name': name, 'model': env.get('VLLM_MODEL', ''), 'port': env.get('VLLM_PORT', '8000'), 'served_name': env.get('VLLM_SERVED_MODEL_NAME', name)}})
+print(json.dumps(models))
+" """
+
+
+def _require_vllm(m: MachineConfig) -> str:
+    if not m.vllm_service_dir:
+        raise HTTPException(status_code=404, detail=f"No vllm_service_dir configured for {m.name}")
+    return m.vllm_service_dir
+
+
+@app.get("/api/machines/{name}/llm/models")
+async def list_llm_models(name: str):
+    m = _get_machine(name)
+    vd = _require_vllm(m)
+    cmd = _LIST_MODELS_CMD.format(vllm_dir=vd)
+    result = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 10})
+    try:
+        return json.loads(result["stdout"])
+    except Exception:
+        raise HTTPException(status_code=500, detail=f"Failed to parse models: {result.get('stdout')}")
+
+
+@app.get("/api/machines/{name}/llm/running")
+async def list_running_llm(name: str):
+    m = _get_machine(name)
+    _require_vllm(m)
+    cmd = "docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || true"
+    result = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 10})
+    containers = []
+    for line in result.get("stdout", "").strip().splitlines():
+        parts = line.split("\t")
+        containers.append({
+            "name": parts[0] if len(parts) > 0 else "",
+            "image": parts[1] if len(parts) > 1 else "",
+            "status": parts[2] if len(parts) > 2 else "",
+            "ports": parts[3] if len(parts) > 3 else "",
+        })
+    return containers
+
+
+class LLMDeployRequest(BaseModel):
+    model: str  # env file stem, e.g. "qwen3dot5-35b-a3b"
+
+
+@app.post("/api/machines/{name}/llm/deploy")
+async def deploy_llm_model(name: str, req: LLMDeployRequest):
+    m = _get_machine(name)
+    vd = _require_vllm(m)
+    # Override VLLM_SERVED_MODEL_NAME via sed so remote.sh uses the selected model
+    cmd = (
+        f"cd {vd} && "
+        f"sed 's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME=\"{req.model}\"/' remote.sh | bash"
+    )
+    result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
+    return result
 
 
 # ---------------------------------------------------------------------------
