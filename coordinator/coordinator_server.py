@@ -134,6 +134,9 @@ _machine_online: dict[str, bool] = {}
 _container_last_active: dict[str, float] = {}
 _idle_log: list[dict] = []  # recent auto-stop events
 
+# Deploy ownership: list of {task_id, machine, model, container, username, submitted_at}
+_deploy_records: list[dict] = []
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -482,7 +485,7 @@ async def list_llm_models(name: str):
 
 
 @app.get("/api/machines/{name}/llm/running")
-async def list_running_llm(name: str):
+async def list_running_llm(name: str, user: dict = Depends(require_auth)):
     m = _get_machine(name)
     _require_vllm(m)
     cmd = "docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || true"
@@ -490,11 +493,17 @@ async def list_running_llm(name: str):
     containers = []
     for line in result.get("stdout", "").strip().splitlines():
         parts = line.split("\t")
+        cname = parts[0] if len(parts) > 0 else ""
+        owner = next((r["username"] for r in _deploy_records if r["machine"] == name and r["container"] == cname), None)
+        # Non-admin only sees containers they deployed
+        if user["role"] != "admin" and owner != user["username"]:
+            continue
         containers.append({
-            "name": parts[0] if len(parts) > 0 else "",
+            "name": cname,
             "image": parts[1] if len(parts) > 1 else "",
             "status": parts[2] if len(parts) > 2 else "",
             "ports": parts[3] if len(parts) > 3 else "",
+            "owner": owner,
         })
     return containers
 
@@ -503,12 +512,16 @@ class LLMStopRequest(BaseModel):
     container: str  # exact container name, e.g. "qwen3dot5-35b-a3b-vllm-1"
 
 @app.post("/api/machines/{name}/llm/stop")
-async def stop_llm_container(name: str, req: LLMStopRequest):
+async def stop_llm_container(name: str, req: LLMStopRequest, user: dict = Depends(require_auth)):
     m = _get_machine(name)
     _require_vllm(m)
     container = req.container
     if not container or any(c in container for c in [';', '&', '|', '$', '`']):
         raise HTTPException(status_code=400, detail="Invalid container name")
+    if user["role"] != "admin":
+        owner = next((r["username"] for r in _deploy_records if r["machine"] == name and r["container"] == container), None)
+        if owner != user["username"]:
+            raise HTTPException(status_code=403, detail="You can only stop containers you deployed")
     cmd = f"docker stop {container} && docker rm {container}"
     result = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 30})
     if result.get("exit_code", 0) != 0:
@@ -521,8 +534,26 @@ class LLMDeployRequest(BaseModel):
     which_gpu: Optional[int] = None  # override VLLM_WHICH_GPU if provided
 
 
+@app.get("/api/llm/my-tasks")
+async def get_my_deploy_tasks(user: dict = Depends(require_auth)):
+    username = user["username"]
+    records = [r for r in _deploy_records if user["role"] == "admin" or r["username"] == username]
+    result = []
+    for r in records:
+        m = cfg.machines.get(r["machine"])
+        status = "unknown"
+        if m:
+            try:
+                task = await _agent_request(m, "GET", f"/tasks/{r['task_id']}", timeout=5)
+                status = task.get("status", "unknown")
+            except Exception:
+                pass
+        result.append({**r, "task_status": status})
+    return result
+
+
 @app.post("/api/machines/{name}/llm/deploy")
-async def deploy_llm_model(name: str, req: LLMDeployRequest):
+async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depends(require_auth)):
     m = _get_machine(name)
     vd = _require_vllm(m)
 
@@ -572,6 +603,15 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest):
         wait_loop = ""
     cmd = f"{wait_loop}cd {vd} && sed '{sed_exprs}' remote.sh | bash"
     result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
+    container_name = f"{req.model}-vllm-1"
+    _deploy_records.append({
+        "task_id": result["id"],
+        "machine": name,
+        "model": req.model,
+        "container": container_name,
+        "username": user["username"],
+        "submitted_at": time.time(),
+    })
     return result
 
 

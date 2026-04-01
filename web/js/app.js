@@ -238,7 +238,9 @@ async function loadTasks() {
         const results = await Promise.allSettled(
             machinesToQuery.map(async m => {
                 const tasks = await api(`/api/machines/${m.name}/tasks`);
-                return tasks.map(t => ({ ...t, machine: m.name }));
+                return tasks
+                    .filter(t => _currentUser?.role === 'admin' || t.submitted_by === _currentUser?.username)
+                    .map(t => ({ ...t, machine: m.name }));
             })
         );
 
@@ -368,6 +370,18 @@ async function loadLLMTab() {
     `;
     grid.appendChild(runningPanel);
 
+    // My Deploy Tasks panel
+    const tasksPanel = document.createElement('div');
+    tasksPanel.className = 'panel';
+    tasksPanel.style.marginBottom = '16px';
+    tasksPanel.id = 'llm-tasks-panel';
+    tasksPanel.innerHTML = `
+        <div class="panel-header"><span class="panel-label">My Deploy Tasks</span></div>
+        <div id="llm-tasks-body"><div class="empty-state">No deploy tasks</div></div>
+    `;
+    grid.insertBefore(tasksPanel, deployPanel);
+    loadDeployTasks();
+
     // Restore previously selected model (survives poll refreshes)
     const modelSel = document.getElementById('llm-model-select');
     if (modelSel) {
@@ -393,7 +407,6 @@ function renderDeployPanel(llmMachines) {
             <select id="llm-model-select" style="flex:2">${modelOptions}</select>
         </div>
         <div id="llm-machine-table" style="margin-bottom:12px; display:none"></div>
-        <div id="llm-queue-notice" style="display:none; margin-bottom:12px; padding:10px 14px; background:rgba(245,166,35,.08); border:1px solid rgba(245,166,35,.3); border-radius:8px; font-size:13px; color:var(--accent); line-height:1.5"></div>
         <div class="cmd-row">
             <button id="llm-deploy-btn" onclick="deployLLM()">Deploy</button>
         </div>
@@ -455,24 +468,11 @@ function updateMachineTable(llmMachines) {
     </tr>`).join('')}</tbody></table>`;
 
     const deployBtn = document.getElementById('llm-deploy-btn');
-    const notice = document.getElementById('llm-queue-notice');
     if (deployBtn && _bestMachine) {
         deployBtn.disabled = false;
-        if (bestFits) {
-            deployBtn.title = `Will deploy on ${_bestMachine} GPU${_bestGpu}`;
-            if (notice) notice.style.display = 'none';
-        } else {
-            const bestRow = rows.find(r => r.machine === _bestMachine && r.gpuIdx === _bestGpu);
-            const need = bestRow?.required ?? '?';
-            const have = bestRow?.free ?? '?';
-            deployBtn.title = `Will queue — deploy starts when GPU memory is free`;
-            if (notice) {
-                notice.style.display = 'block';
-                notice.innerHTML = `&#9203; <strong>Will be queued.</strong> No GPU has enough free memory right now.<br>`
-                    + `Best option: <strong>${_bestMachine} GPU${_bestGpu}</strong> — needs ${need} MiB, has ${have} MiB free. `
-                    + `The task will wait (checking every 60s) and deploy automatically once memory is available.`;
-            }
-        }
+        deployBtn.title = bestFits
+            ? `Will deploy on ${_bestMachine} GPU${_bestGpu}`
+            : `Will queue on ${_bestMachine} GPU${_bestGpu} — waiting for free memory`;
     }
 }
 
@@ -541,7 +541,12 @@ async function deployLLM() {
             body: JSON.stringify(body),
         });
         const gpuInfo = body.which_gpu !== undefined ? ` GPU${body.which_gpu}` : '';
-        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${_bestMachine}${gpuInfo}\nModel: ${model}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
+        const queued = task.status === 'queued';
+        const queueMsg = queued
+            ? `\n\n⏳ No GPU memory available right now. Task is queued and will deploy automatically once memory frees up (checks every 60s). You can cancel it below in "My Deploy Tasks".`
+            : `\n\nDeploy started. Track progress below in "My Deploy Tasks".`;
+        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${_bestMachine}${gpuInfo}\nModel: ${model}${queueMsg}`;
+        loadDeployTasks();
     } catch (err) {
         const msg = err.message.includes('409') || err.message.includes('Insufficient')
             ? `Deployment blocked: ${err.message.replace(/^\d+:\s*/, '')}`
@@ -551,6 +556,47 @@ async function deployLLM() {
         // Re-evaluate Deploy button state based on memory
         const llmMachines = machines.filter(m => m.vllm_service_dir);
         updateMachineTable(llmMachines);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Deploy tasks
+// ---------------------------------------------------------------------------
+async function loadDeployTasks() {
+    const body = document.getElementById('llm-tasks-body');
+    if (!body) return;
+    try {
+        const tasks = await api('/api/llm/my-tasks');
+        if (tasks.length === 0) {
+            body.innerHTML = '<div class="empty-state">No deploy tasks</div>';
+            return;
+        }
+        body.innerHTML = `<table class="task-table">
+            <thead><tr><th>Model</th><th>Machine</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
+            <tbody>${tasks.map(t => {
+                const age = Math.round((Date.now()/1000 - t.submitted_at) / 60);
+                const canCancel = t.task_status === 'queued' || t.task_status === 'running';
+                return `<tr>
+                    <td style="font-family:var(--mono); font-size:12px">${escapeHtml(t.model)}</td>
+                    <td style="font-size:12px">${escapeHtml(t.machine)}</td>
+                    <td><span class="task-status ${t.task_status}">${t.task_status}</span></td>
+                    <td style="font-size:12px; color:var(--text-dim)">${age}m ago</td>
+                    <td>${canCancel ? `<button class="cancel-btn" onclick="cancelDeployTask('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}')">Cancel</button>` : ''}</td>
+                </tr>`;
+            }).join('')}</tbody>
+        </table>`;
+    } catch (e) {
+        body.innerHTML = `<div class="empty-state">Failed to load tasks</div>`;
+    }
+}
+
+async function cancelDeployTask(machine, taskId) {
+    if (!confirm(`Cancel deploy task ${taskId}?`)) return;
+    try {
+        await api(`/api/machines/${machine}/tasks/${taskId}`, { method: 'DELETE' });
+        loadDeployTasks();
+    } catch (e) {
+        alert('Failed to cancel: ' + e.message);
     }
 }
 
