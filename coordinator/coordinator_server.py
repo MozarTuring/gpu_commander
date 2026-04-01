@@ -473,26 +473,35 @@ async def delete_hf_token():
 # LLM Services
 # ---------------------------------------------------------------------------
 
-_LIST_MODELS_CMD = """python3 -c "
-import os, json
-d = '{vllm_dir}'
-models = []
-for f in sorted(os.listdir(d)):
-    if not f.endswith('.env'):
-        continue
-    name = f[:-4]
-    if not name:
-        continue
-    env = {{}}
-    with open(os.path.join(d, f)) as fp:
-        for line in fp:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                k, v = line.split('=', 1)
-                env[k.strip()] = v.strip()
-    models.append({{'name': name, 'model': env.get('VLLM_MODEL', ''), 'port': env.get('VLLM_PORT', '8000'), 'served_name': env.get('VLLM_SERVED_MODEL_NAME', name), 'which_gpu': int(env.get('VLLM_WHICH_GPU', '0')), 'memory_utilization': float(env.get('VLLM_GPU_MEMORY_UTILIZATION', '0.85'))}})
-print(json.dumps(models))
-" """
+def _read_llm_models(vllm_dir: str) -> list[dict]:
+    """Read model configs directly from local vllm_service_dir .env files."""
+    import os as _os
+    models = []
+    try:
+        for f in sorted(_os.listdir(vllm_dir)):
+            if not f.endswith('.env'):
+                continue
+            name = f[:-4]
+            if not name:
+                continue
+            env: dict[str, str] = {}
+            with open(_os.path.join(vllm_dir, f)) as fp:
+                for line in fp:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        env[k.strip()] = v.strip()
+            models.append({
+                'name': name,
+                'model': env.get('VLLM_MODEL', ''),
+                'port': env.get('VLLM_PORT', '8000'),
+                'served_name': env.get('VLLM_SERVED_MODEL_NAME', name),
+                'which_gpu': int(env.get('VLLM_WHICH_GPU', '0')),
+                'memory_utilization': float(env.get('VLLM_GPU_MEMORY_UTILIZATION', '0.85')),
+            })
+    except Exception:
+        pass
+    return models
 
 
 def _require_vllm(m: MachineConfig) -> str:
@@ -505,12 +514,7 @@ def _require_vllm(m: MachineConfig) -> str:
 async def list_llm_models(name: str):
     m = _get_machine(name)
     vd = _require_vllm(m)
-    cmd = _LIST_MODELS_CMD.format(vllm_dir=vd)
-    result = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 10})
-    try:
-        return json.loads(result["stdout"])
-    except Exception:
-        raise HTTPException(status_code=500, detail=f"Failed to parse models: {result.get('stdout')}")
+    return _read_llm_models(vd)
 
 
 @app.get("/api/machines/{name}/llm/running")
@@ -584,12 +588,7 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
     vd = _require_vllm(m)
 
     # Fetch model config to check memory requirement
-    list_cmd = _LIST_MODELS_CMD.format(vllm_dir=vd)
-    list_result = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
-    try:
-        all_models = json.loads(list_result["stdout"])
-    except Exception:
-        all_models = []
+    all_models = _read_llm_models(vd)
     model_cfg = next((x for x in all_models if x["name"] == req.model), None)
 
     which_gpu = req.which_gpu if req.which_gpu is not None else (model_cfg.get("which_gpu", 0) if model_cfg else 0)
