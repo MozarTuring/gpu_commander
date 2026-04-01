@@ -131,6 +131,10 @@ function renderMachines(data) {
     });
 
     document.getElementById('lastUpdated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+
+    const activeTab = document.querySelector('.tab.active')?.dataset.tab;
+    if (activeTab === 'llm') loadLLMTab();
+    if (activeTab === 'tasks') loadTasks();
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +339,11 @@ async function loadLLMTab() {
     if (llmMachines.length === 0) {
         grid.innerHTML = '<div class="empty-state">No machines with LLM services configured</div>';
         return;
+    }
+
+    // Show loading state immediately before any async calls
+    if (_llmModels.length === 0) {
+        grid.innerHTML = '<div class="empty-state">Loading LLM services...</div>';
     }
 
     // Fetch models from first online vllm machine (same repo on all machines)
