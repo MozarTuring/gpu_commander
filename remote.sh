@@ -13,13 +13,14 @@ VENV_DIR="${PROJ_DIR}/.venv"
 CONFIG_FILE="${PROJ_DIR}/config.yaml"
 
 # Create/reuse venv and install deps
-if [[ ! -d "${VENV_DIR}" ]]; then
+if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
     echo "Creating virtualenv at ${VENV_DIR}..."
+    rm -rf "${VENV_DIR}"
     python3 -m venv "${VENV_DIR}"
 fi
 source "${VENV_DIR}/bin/activate"
 
-pip install -q fastapi 'uvicorn[standard]' pyyaml 2>&1 | tail -3
+pip install -q fastapi 'uvicorn[standard]' pyyaml httpx 2>&1 | tail -3
 
 AGENT_PORT=$(python3 -c "
 import yaml
@@ -66,7 +67,19 @@ else
     tail -20 "${AGENT_DIR}/agent.log" 2>/dev/null || true
 fi
 
-# Start coordinator
+# Start coordinator (only on the designated coordinator host)
+COORDINATOR_HOST=$(python3 -c "
+import yaml
+with open('${CONFIG_FILE}') as f:
+    cfg = yaml.safe_load(f)
+print(cfg.get('coordinator', {}).get('host_machine', ''))
+" 2>/dev/null || echo "")
+
+if [[ -z "${COORDINATOR_HOST}" || "${SERVER_NAME}" != "${COORDINATOR_HOST}" ]]; then
+    echo "Skipping coordinator (not the coordinator host)"
+    return 0 2>/dev/null || exit 0
+fi
+
 COORDINATOR_PORT=$(python3 -c "
 import yaml
 with open('${CONFIG_FILE}') as f:

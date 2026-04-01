@@ -2,6 +2,7 @@ coordinator:
   host: "0.0.0.0"
   port: 9800
   poll_interval: 10  # seconds between GPU status polls
+  host_machine: "custodian2ferragon"  # only this machine runs the coordinator
 
 auth:
   token: "gpu-commander-secret-change-me"
