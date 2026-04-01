@@ -392,7 +392,7 @@ function renderDeployPanel(llmMachines) {
         <div class="cmd-row" style="margin-bottom:12px">
             <select id="llm-model-select" style="flex:2">${modelOptions}</select>
         </div>
-        <div id="llm-machine-table" style="margin-bottom:12px"></div>
+        <div id="llm-machine-table" style="margin-bottom:12px; display:none"></div>
         <div id="llm-queue-notice" style="display:none; margin-bottom:12px; padding:10px 14px; background:rgba(245,166,35,.08); border:1px solid rgba(245,166,35,.3); border-radius:8px; font-size:13px; color:var(--accent); line-height:1.5"></div>
         <div class="cmd-row">
             <button id="llm-deploy-btn" onclick="deployLLM()">Deploy</button>
@@ -443,6 +443,7 @@ function updateMachineTable(llmMachines) {
 
     const bestFits = rows.find(r => r.machine === _bestMachine && r.gpuIdx === _bestGpu)?.fits ?? false;
 
+    if (_currentUser?.role === 'admin') tableDiv.style.display = 'block';
     tableDiv.innerHTML = `<table class="task-table"><thead><tr>
         <th>Machine</th><th>GPU</th><th>Required</th><th>Free</th><th>Status</th>
     </tr></thead><tbody>${rows.map(r => `<tr${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' style="background:rgba(52,211,153,0.05)"' : ''}>
