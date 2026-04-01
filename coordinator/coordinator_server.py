@@ -361,7 +361,8 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest):
 
     sed_exprs = f's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME="{req.model}"/'
     if req.which_gpu is not None:
-        sed_exprs += f'; s/^VLLM_WHICH_GPU=.*/VLLM_WHICH_GPU={req.which_gpu}/'
+        # Inject export before docker compose so CUDA_VISIBLE_DEVICES is overridden
+        sed_exprs += f'; s|docker compose -p|export VLLM_WHICH_GPU={req.which_gpu}\\n    docker compose -p|'
     if _hf_token:
         sed_exprs += f'; s/^export HUGGING_FACE_HUB_TOKEN=.*/export HUGGING_FACE_HUB_TOKEN="{_hf_token}"/'
         sed_exprs += f'; s/^export HF_TOKEN=.*/export HF_TOKEN="{_hf_token}"/'
