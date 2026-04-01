@@ -425,7 +425,8 @@ function updateMachineTable(llmMachines) {
             const required = Math.round(memUtil * gpu.memory_total_mib);
             const free = gpu.memory_free_mib;
             const fits = free >= required;
-            if (fits && free > bestFree) {
+            // Always pick the GPU with most free memory, regardless of fit
+            if (free > bestFree) {
                 bestFree = free;
                 _bestMachine = m.name;
                 _bestGpu = gpu.index;
@@ -433,6 +434,8 @@ function updateMachineTable(llmMachines) {
             rows.push({ machine: m.name, gpuIdx: gpu.index, required, free, fits, status: fits ? 'fits' : 'no fit' });
         }
     }
+
+    const bestFits = rows.find(r => r.machine === _bestMachine && r.gpuIdx === _bestGpu)?.fits ?? false;
 
     tableDiv.innerHTML = `<table class="task-table"><thead><tr>
         <th>Machine</th><th>GPU</th><th>Required</th><th>Free</th><th>Status</th>
@@ -445,13 +448,11 @@ function updateMachineTable(llmMachines) {
     </tr>`).join('')}</tbody></table>`;
 
     const deployBtn = document.getElementById('llm-deploy-btn');
-    if (_bestMachine) {
-        if (deployBtn) { deployBtn.disabled = false; deployBtn.title = `Will deploy on ${_bestMachine} GPU${_bestGpu}`; }
-    } else {
-        if (deployBtn) {
-            deployBtn.disabled = true;
-            deployBtn.title = 'No machine has enough free GPU memory. Stop a running model first.';
-        }
+    if (deployBtn && _bestMachine) {
+        deployBtn.disabled = false;
+        deployBtn.title = bestFits
+            ? `Will deploy on ${_bestMachine} GPU${_bestGpu}`
+            : `Will queue on ${_bestMachine} GPU${_bestGpu} — waiting for free memory`;
     }
 }
 

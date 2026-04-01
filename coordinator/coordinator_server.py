@@ -341,37 +341,42 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest):
         all_models = []
     model_cfg = next((x for x in all_models if x["name"] == req.model), None)
 
+    which_gpu = req.which_gpu if req.which_gpu is not None else (model_cfg.get("which_gpu", 0) if model_cfg else 0)
+    required_mib = None
     if model_cfg:
-        which_gpu = req.which_gpu if req.which_gpu is not None else model_cfg.get("which_gpu", 0)
-        mem_util = model_cfg.get("memory_utilization", 0.85)
         gpu_status = _gpu_cache.get(name)
         if gpu_status:
             gpus = gpu_status.get("gpus", [])
             if which_gpu < len(gpus):
-                gpu = gpus[which_gpu]
-                required_mib = round(mem_util * gpu["memory_total_mib"])
-                free_mib = gpu["memory_free_mib"]
-                if free_mib < required_mib:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Insufficient GPU memory on {name} GPU{which_gpu}: "
-                               f"need {required_mib} MiB, only {free_mib} MiB free. "
-                               f"Stop a running model first.",
-                    )
+                mem_util = model_cfg.get("memory_utilization", 0.85)
+                required_mib = round(mem_util * gpus[which_gpu]["memory_total_mib"])
 
-    sed_exprs = f's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME="{req.model}"/'
-    if req.which_gpu is not None:
-        # Inject export before docker compose so CUDA_VISIBLE_DEVICES is overridden
-        sed_exprs += f'; s|docker compose -p|export VLLM_WHICH_GPU={req.which_gpu}\\n    docker compose -p|'
-    if _hf_token:
-        sed_exprs += f'; s/^export HUGGING_FACE_HUB_TOKEN=.*/export HUGGING_FACE_HUB_TOKEN="{_hf_token}"/'
-        sed_exprs += f'; s/^export HF_TOKEN=.*/export HF_TOKEN="{_hf_token}"/'
-    elif not _hf_token:
+    if not _hf_token:
         raise HTTPException(
             status_code=400,
             detail="No HuggingFace token configured. Set your HF token in Settings before deploying.",
         )
-    cmd = f"cd {vd} && sed '{sed_exprs}' remote.sh | bash"
+
+    sed_exprs = f's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME="{req.model}"/'
+    sed_exprs += f'; s|docker compose -p|export VLLM_WHICH_GPU={which_gpu}\\n    docker compose -p|'
+    sed_exprs += f'; s/^export HUGGING_FACE_HUB_TOKEN=.*/export HUGGING_FACE_HUB_TOKEN="{_hf_token}"/'
+    sed_exprs += f'; s/^export HF_TOKEN=.*/export HF_TOKEN="{_hf_token}"/'
+
+    # Prepend a memory-wait loop so the task queues until GPU is free
+    if required_mib is not None:
+        wait_loop = (
+            f'echo "Waiting for GPU {which_gpu} to have {required_mib} MiB free..."; '
+            f'while true; do '
+            f'  _free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i {which_gpu} | tr -d " "); '
+            f'  if [ "${{_free}}" -ge {required_mib} ]; then '
+            f'    echo "GPU memory ready: ${{_free}} MiB free"; break; '
+            f'  fi; '
+            f'  echo "Need {required_mib} MiB, have ${{_free}} MiB — retrying in 60s..."; sleep 60; '
+            f'done && '
+        )
+    else:
+        wait_loop = ""
+    cmd = f"{wait_loop}cd {vd} && sed '{sed_exprs}' remote.sh | bash"
     result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
     return result
 
