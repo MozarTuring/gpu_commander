@@ -215,7 +215,36 @@ async def logout(request: Request):
 
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(require_auth)):
-    return {"username": user["username"], "role": user["role"]}
+    users = _load_users()
+    u = users.get(user["username"], {})
+    stellar = u.get("stellar_account", "")
+    hf = u.get("hf_token", "")
+    return {
+        "username": user["username"],
+        "role": user["role"],
+        "stellar_account": stellar,
+        "hf_token_set": bool(hf),
+        "setup_required": not stellar,
+    }
+
+
+class UserProfileRequest(BaseModel):
+    stellar_account: Optional[str] = None
+    hf_token: Optional[str] = None
+
+@app.post("/api/auth/profile")
+async def update_profile(req: UserProfileRequest, user: dict = Depends(require_auth)):
+    users = _load_users()
+    username = user["username"]
+    if req.stellar_account is not None:
+        users[username]["stellar_account"] = req.stellar_account.strip()
+    if req.hf_token is not None:
+        users[username]["hf_token"] = req.hf_token.strip()
+    _save_users(users)
+    # Refresh session data
+    stellar = users[username].get("stellar_account", "")
+    hf = users[username].get("hf_token", "")
+    return {"ok": True, "stellar_account": stellar, "hf_token_set": bool(hf), "setup_required": not stellar}
 
 
 # ---------------------------------------------------------------------------
@@ -573,16 +602,19 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
                 mem_util = model_cfg.get("memory_utilization", 0.85)
                 required_mib = round(mem_util * gpus[which_gpu]["memory_total_mib"])
 
-    if not _hf_token:
+    users = _load_users()
+    user_hf = users.get(user["username"], {}).get("hf_token", "")
+    effective_hf = user_hf or _hf_token
+    if not effective_hf:
         raise HTTPException(
             status_code=400,
-            detail="No HuggingFace token configured. Set your HF token in Settings before deploying.",
+            detail="No HuggingFace token configured. Set your HF token in your profile before deploying.",
         )
 
     sed_exprs = f's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME="{req.model}"/'
     sed_exprs += f'; s|docker compose -p|export VLLM_WHICH_GPU={which_gpu}\\n    docker compose -p|'
-    sed_exprs += f'; s/^export HUGGING_FACE_HUB_TOKEN=.*/export HUGGING_FACE_HUB_TOKEN="{_hf_token}"/'
-    sed_exprs += f'; s/^export HF_TOKEN=.*/export HF_TOKEN="{_hf_token}"/'
+    sed_exprs += f'; s/^export HUGGING_FACE_HUB_TOKEN=.*/export HUGGING_FACE_HUB_TOKEN="{effective_hf}"/'
+    sed_exprs += f'; s/^export HF_TOKEN=.*/export HF_TOKEN="{effective_hf}"/'
 
     # Prepend a memory-wait loop so the task queues until GPU is free
     if required_mib is not None:

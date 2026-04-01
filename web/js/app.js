@@ -367,9 +367,12 @@ async function loadLLMTab() {
 
     // Per-machine running services
     const runningPanel = document.createElement('div');
-    runningPanel.className = 'cmd-panel';
+    runningPanel.className = 'panel';
     runningPanel.innerHTML = `
-        <h3 style="margin-bottom:14px">Running Services</h3>
+        <div class="panel-header">
+            <span class="panel-label">Running Services</span>
+            <button class="login-btn" style="padding:6px 16px; font-size:11px; width:auto; margin:0" onclick="showAccessModal()">Access a Model</button>
+        </div>
         ${llmMachines.map(m => renderRunningSection(m)).join('')}
     `;
     grid.appendChild(runningPanel);
@@ -654,6 +657,10 @@ async function loadSettings() {
         status.textContent = 'Failed to load settings.';
     }
     await loadUserManagement();
+
+    // Pre-fill profile fields
+    const stellarInput = document.getElementById('settings-stellar');
+    if (stellarInput && _currentUser?.stellar_account) stellarInput.value = _currentUser.stellar_account;
 }
 
 async function saveHFToken() {
@@ -733,11 +740,14 @@ async function login() {
         }
         const data = await resp.json();
         _authToken = data.token;
-        _currentUser = { username: data.username, role: data.role };
+        // Fetch full profile (includes stellar_account, setup_required)
+        const meResp = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${_authToken}` } });
+        _currentUser = meResp.ok ? await meResp.json() : { username: data.username, role: data.role };
         localStorage.setItem('gpu_cmd_token', _authToken);
         hideLoginOverlay();
         updateUserDisplay();
         document.getElementById('login-password').value = '';
+        if (_currentUser.setup_required) { showSetupModal(); return; }
         startPolling();
     } catch (e) {
         errorEl.textContent = 'Connection error';
@@ -823,6 +833,105 @@ async function changeOwnPassword() {
 }
 
 // ---------------------------------------------------------------------------
+// Profile setup modal
+// ---------------------------------------------------------------------------
+function showSetupModal() {
+    document.getElementById('setup-modal').style.display = 'flex';
+    if (_currentUser?.stellar_account)
+        document.getElementById('setup-stellar').value = _currentUser.stellar_account;
+}
+
+async function saveProfile() {
+    const stellar = document.getElementById('setup-stellar').value.trim();
+    const hfToken = document.getElementById('setup-hf-token')?.value.trim() || '';
+    const errEl = document.getElementById('setup-error');
+    errEl.textContent = '';
+    if (!stellar) { errEl.textContent = 'Stellar account is required.'; return; }
+    try {
+        const body = { stellar_account: stellar };
+        if (hfToken) body.hf_token = hfToken;
+        await api('/api/auth/profile', { method: 'POST', body: JSON.stringify(body) });
+        _currentUser.stellar_account = stellar;
+        _currentUser.setup_required = false;
+        document.getElementById('setup-modal').style.display = 'none';
+        startPolling();
+    } catch (e) {
+        errEl.textContent = 'Failed to save: ' + e.message;
+    }
+}
+
+// Also allow saving from Settings tab
+async function saveProfileFromSettings() {
+    const stellar = document.getElementById('settings-stellar').value.trim();
+    const hfToken = document.getElementById('settings-hf-token-user').value.trim();
+    const body = {};
+    if (stellar) body.stellar_account = stellar;
+    if (hfToken) body.hf_token = hfToken;
+    if (!Object.keys(body).length) return;
+    try {
+        await api('/api/auth/profile', { method: 'POST', body: JSON.stringify(body) });
+        if (stellar) _currentUser.stellar_account = stellar;
+        alert('Profile saved.');
+    } catch (e) {
+        alert('Failed: ' + e.message);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Access modal
+// ---------------------------------------------------------------------------
+function showAccessModal() {
+    const stellarAccount = _currentUser?.stellar_account || '[stellar_account]';
+    const allContainers = [];
+    for (const [machineName, containers] of Object.entries(_llmRunning)) {
+        const m = machines.find(m => m.name === machineName);
+        const hostDesc = m?.description || machineName;
+        for (const c of containers) {
+            const hostPort = (c.ports.match(/:(\d+)->/) || [])[1];
+            if (hostPort) allContainers.push({ machineName, hostDesc, container: c, hostPort });
+        }
+    }
+
+    if (allContainers.length === 0) {
+        document.getElementById('access-modal-body').innerHTML =
+            '<div class="empty-state">No running models to access.</div>';
+        document.getElementById('access-modal').style.display = 'flex';
+        return;
+    }
+
+    const rows = allContainers.map(({ machineName, hostDesc, container, hostPort }) => {
+        const sshCmd = `ssh -f -N -L ${hostPort}:localhost:${hostPort} ${stellarAccount}@${hostDesc}`;
+        const curlCmd = `curl http://localhost:${hostPort}/v1/models`;
+        const chatCmd = `curl http://localhost:${hostPort}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"${container.name.replace(/-vllm-1$/, '')}","messages":[{"role":"user","content":"Hello!"}]}'`;
+        return `<div class="model-access-row">
+            <div class="model-access-name">${escapeHtml(container.name.replace(/-vllm-1$/, ''))}
+                <span style="font-family:var(--font); font-size:11px; color:var(--text-dim); font-weight:400"> — ${escapeHtml(displayName(machineName))} · port ${hostPort}</span>
+            </div>
+            <div class="access-step-label" style="margin-top:8px">1. Forward port</div>
+            <div class="access-cmd">${escapeHtml(sshCmd)}</div>
+            <div class="access-step-label" style="margin-top:8px">2. List models</div>
+            <div class="access-cmd">${escapeHtml(curlCmd)}</div>
+            <div class="access-step-label" style="margin-top:8px">3. Chat</div>
+            <div class="access-cmd" style="white-space:pre">${escapeHtml(chatCmd)}</div>
+        </div>`;
+    }).join('');
+
+    const noStellar = !_currentUser?.stellar_account;
+    const warn = noStellar ? `<div style="margin-bottom:16px; padding:10px 14px; background:var(--red-lo); border:1px solid rgba(255,77,109,.3); border-radius:8px; font-size:13px; color:var(--red)">
+        Your stellar account is not set. Go to Settings to add it so commands are autofilled.
+    </div>` : '';
+
+    document.getElementById('access-modal-body').innerHTML = warn + rows;
+    document.getElementById('access-modal').style.display = 'flex';
+}
+
+function closeAccessModal() {
+    document.getElementById('access-modal').style.display = 'none';
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 (async () => {
@@ -835,6 +944,7 @@ async function changeOwnPassword() {
         _currentUser = await me.json();
         hideLoginOverlay();
         updateUserDisplay();
+        if (_currentUser.setup_required) { showSetupModal(); return; }
         startPolling();
     } catch (_) {
         showLoginOverlay();

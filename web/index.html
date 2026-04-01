@@ -158,6 +158,23 @@
 
                 <div class="panel">
                     <div class="panel-header">
+                        <span class="panel-label">My Profile</span>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Stellar Account Username</label>
+                        <input type="text" id="settings-stellar" class="form-input" placeholder="your_username">
+                        <div style="font-size:11px; color:var(--text-dim); margin-top:5px">Used to autofill SSH tunnel commands when accessing models.</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">HuggingFace Token <span style="color:var(--text-dim); font-weight:400; text-transform:none; letter-spacing:0">(optional)</span></label>
+                        <input type="password" id="settings-hf-token-user" class="form-input" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx">
+                        <div style="font-size:11px; color:var(--text-dim); margin-top:5px">Used when deploying gated models. Overrides the server-level token.</div>
+                    </div>
+                    <button class="login-btn" style="width:auto; padding:9px 22px" onclick="saveProfileFromSettings()">Save Profile</button>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header">
                         <span class="panel-label">Change Password</span>
                     </div>
                     <div class="cmd-row">
@@ -166,6 +183,38 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Setup modal (first-login profile) -->
+    <div id="setup-modal" class="modal-overlay" style="display:none">
+        <div class="modal-card" style="max-width:460px">
+            <div class="modal-header">
+                <span class="panel-label">Complete Your Profile</span>
+            </div>
+            <p class="settings-desc" style="margin-bottom:20px">Before using GPU Commander, set up your profile. These are required to access deployed models.</p>
+            <div class="form-group">
+                <label class="form-label">Stellar Account Username</label>
+                <input type="text" id="setup-stellar" class="form-input" placeholder="your_username">
+                <div style="font-size:11px; color:var(--text-dim); margin-top:5px">Used to build SSH tunnel commands for accessing models.</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">HuggingFace Token <span style="color:var(--text-dim); font-weight:400; text-transform:none; letter-spacing:0">(optional — needed to deploy gated models)</span></label>
+                <input type="password" id="setup-hf-token" class="form-input" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx">
+            </div>
+            <div id="setup-error" class="login-error"></div>
+            <button class="login-btn" onclick="saveProfile()">Save &amp; Continue</button>
+        </div>
+    </div>
+
+    <!-- Access modal -->
+    <div id="access-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeAccessModal()">
+        <div class="modal-card" style="max-width:640px; max-height:85vh; overflow-y:auto">
+            <div class="modal-header" style="margin-bottom:20px">
+                <span class="panel-label">Access Models</span>
+                <button class="modal-close" onclick="closeAccessModal()">✕</button>
+            </div>
+            <div id="access-modal-body"></div>
         </div>
     </div>
 
