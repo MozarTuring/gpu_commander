@@ -119,7 +119,7 @@ function renderMachines(data) {
         card.innerHTML = `
             <div class="machine-header">
                 <div>
-                    <div class="machine-name">${m.name}</div>
+                    <div class="machine-name">${displayName(m.name)}</div>
                     <div class="machine-desc">${m.description || m.host}</div>
                 </div>
                 <span class="status-badge ${statusClass}"><span class="status-dot"></span>${statusText}</span>
@@ -147,7 +147,7 @@ function populateMachineSelects(data) {
         data.forEach(m => {
             const opt = document.createElement('option');
             opt.value = m.name;
-            opt.textContent = `${m.name}${m.online ? '' : ' (offline)'}`;
+            opt.textContent = `${displayName(m.name)}${m.online ? '' : ' (offline)'}`;
             el.appendChild(opt);
         });
         if (current) el.value = current;
@@ -261,7 +261,7 @@ async function loadTasks() {
             <tbody>
                 ${allTasks.map(t => `<tr>
                     <td style="font-family:var(--mono); font-size:12px">${t.id}</td>
-                    <td>${t.machine}</td>
+                    <td>${displayName(t.machine)}</td>
                     <td style="font-family:var(--mono); font-size:12px; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${escapeHtml(t.command)}</td>
                     <td><span class="task-status ${t.status}">${t.status}</span></td>
                     <td style="font-size:12px; color:var(--text-dim)">${t.created_at ? new Date(t.created_at * 1000).toLocaleString() : '—'}</td>
@@ -312,6 +312,10 @@ function startPolling(interval = 10000) {
 // ---------------------------------------------------------------------------
 // Util
 // ---------------------------------------------------------------------------
+function displayName(name) {
+    return (name || '').replace(/^custodian2/, '');
+}
+
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str || '';
@@ -461,7 +465,7 @@ function updateMachineTable(llmMachines) {
     tableDiv.innerHTML = `<table class="task-table"><thead><tr>
         <th>Machine</th><th>GPU</th><th>Required</th><th>Free</th><th>Status</th>
     </tr></thead><tbody>${rows.map(r => `<tr${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' style="background:rgba(52,211,153,0.05)"' : ''}>
-        <td>${escapeHtml(r.machine)}</td>
+        <td>${displayName(r.machine)}</td>
         <td style="font-family:var(--mono)">${r.gpuIdx}</td>
         <td style="font-family:var(--mono)">${r.required != null ? r.required + ' MiB' : '—'}</td>
         <td style="font-family:var(--mono); color:${r.free != null ? (r.fits ? 'var(--green)' : 'var(--red)') : 'inherit'}">${r.free != null ? r.free + ' MiB' : '—'}</td>
@@ -481,7 +485,7 @@ function updateMachineTable(llmMachines) {
         if (alreadyRunning) {
             const owner = alreadyRunning.container.owner;
             alreadyEl.style.display = 'block';
-            alreadyEl.innerHTML = `Already running on <strong>${escapeHtml(alreadyRunning.machine)}</strong>`
+            alreadyEl.innerHTML = `Already running on <strong>${escapeHtml(displayName(alreadyRunning.machine))}</strong>`
                 + (owner ? ` · deployed by <strong>${escapeHtml(owner)}</strong>` : '');
         } else {
             alreadyEl.style.display = 'none';
@@ -492,8 +496,8 @@ function updateMachineTable(llmMachines) {
     if (deployBtn && _bestMachine) {
         deployBtn.disabled = false;
         deployBtn.title = bestFits
-            ? `Will deploy on ${_bestMachine} GPU${_bestGpu}`
-            : `Will queue on ${_bestMachine} GPU${_bestGpu} — waiting for free memory`;
+            ? `Will deploy on ${displayName(_bestMachine)} GPU${_bestGpu}`
+            : `Will queue on ${displayName(_bestMachine)} GPU${_bestGpu} — waiting for free memory`;
     }
 }
 
@@ -530,7 +534,7 @@ function renderRunningSection(m) {
             }).join('')}
            </tbody></table>`;
     return `<div style="margin-bottom:12px">
-        <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em">${escapeHtml(m.name)}</div>
+        <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em">${escapeHtml(displayName(m.name))}</div>
         ${rowsHtml}
     </div>`;
 }
@@ -571,7 +575,7 @@ async function deployLLM() {
         const queueMsg = queued
             ? `\n\n⏳ No GPU memory available right now. Task is queued and will deploy automatically once memory frees up (checks every 60s). You can cancel it below in "My Deploy Tasks".`
             : `\n\nDeploy started. Track progress below in "My Deploy Tasks".`;
-        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${_bestMachine}${gpuInfo}\nModel: ${model}${queueMsg}`;
+        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${displayName(_bestMachine)}${gpuInfo}\nModel: ${model}${queueMsg}`;
         loadDeployTasks();
     } catch (err) {
         const msg = err.message.includes('409') || err.message.includes('Insufficient')
@@ -604,7 +608,7 @@ async function loadDeployTasks() {
                 const canCancel = t.task_status === 'queued' || t.task_status === 'running';
                 return `<tr>
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(t.model)}</td>
-                    <td style="font-size:12px">${escapeHtml(t.machine)}</td>
+                    <td style="font-size:12px">${escapeHtml(displayName(t.machine))}</td>
                     <td><span class="task-status ${t.task_status}">${t.task_status}</span></td>
                     <td style="font-size:12px; color:var(--text-dim)">${age}m ago</td>
                     <td>${canCancel ? `<button class="cancel-btn" onclick="cancelDeployTask('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}')">Cancel</button>` : ''}</td>
