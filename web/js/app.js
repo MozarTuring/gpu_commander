@@ -393,6 +393,7 @@ function renderDeployPanel(llmMachines) {
             <select id="llm-model-select" style="flex:2">${modelOptions}</select>
         </div>
         <div id="llm-machine-table" style="margin-bottom:12px"></div>
+        <div id="llm-queue-notice" style="display:none; margin-bottom:12px; padding:10px 14px; background:rgba(245,166,35,.08); border:1px solid rgba(245,166,35,.3); border-radius:8px; font-size:13px; color:var(--accent); line-height:1.5"></div>
         <div class="cmd-row">
             <button id="llm-deploy-btn" onclick="deployLLM()">Deploy</button>
         </div>
@@ -453,11 +454,24 @@ function updateMachineTable(llmMachines) {
     </tr>`).join('')}</tbody></table>`;
 
     const deployBtn = document.getElementById('llm-deploy-btn');
+    const notice = document.getElementById('llm-queue-notice');
     if (deployBtn && _bestMachine) {
         deployBtn.disabled = false;
-        deployBtn.title = bestFits
-            ? `Will deploy on ${_bestMachine} GPU${_bestGpu}`
-            : `Will queue on ${_bestMachine} GPU${_bestGpu} — waiting for free memory`;
+        if (bestFits) {
+            deployBtn.title = `Will deploy on ${_bestMachine} GPU${_bestGpu}`;
+            if (notice) notice.style.display = 'none';
+        } else {
+            const bestRow = rows.find(r => r.machine === _bestMachine && r.gpuIdx === _bestGpu);
+            const need = bestRow?.required ?? '?';
+            const have = bestRow?.free ?? '?';
+            deployBtn.title = `Will queue — deploy starts when GPU memory is free`;
+            if (notice) {
+                notice.style.display = 'block';
+                notice.innerHTML = `&#9203; <strong>Will be queued.</strong> No GPU has enough free memory right now.<br>`
+                    + `Best option: <strong>${_bestMachine} GPU${_bestGpu}</strong> — needs ${need} MiB, has ${have} MiB free. `
+                    + `The task will wait (checking every 60s) and deploy automatically once memory is available.`;
+            }
+        }
     }
 }
 
