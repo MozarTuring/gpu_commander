@@ -523,6 +523,16 @@ function renderRunningSection(m) {
                 const stopBtn = isOwner || _currentUser?.role === 'admin'
                     ? `<button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button>`
                     : '';
+                const hostPort = (c.ports.match(/:(\d+)->/) || [])[1] || '';
+                const sshHost = m.name;  // used internally, displayName only for labels
+                const accessHint = hostPort ? `<tr>
+                    <td colspan="6" style="padding:0 12px 10px; border-bottom:1px solid var(--border)">
+                        <div style="font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--bg); border-radius:6px; padding:8px 12px; line-height:1.8">
+                            <span style="color:var(--text-mid)">Forward port:</span> ssh -f -N -L ${hostPort}:localhost:${hostPort} ${sshHost}<br>
+                            <span style="color:var(--text-mid)">Test:</span> curl http://localhost:${hostPort}/v1/models
+                        </div>
+                    </td>
+                </tr>` : '';
                 return `<tr>
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
                     <td style="font-size:12px; color:var(--text-dim)">${escapeHtml(c.owner || '—')}</td>
@@ -530,7 +540,7 @@ function renderRunningSection(m) {
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
                     <td>${idleHtml}</td>
                     <td>${stopBtn}</td>
-                </tr>`;
+                </tr>${accessHint}`;
             }).join('')}
            </tbody></table>`;
     return `<div style="margin-bottom:12px">
