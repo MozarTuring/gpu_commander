@@ -22,6 +22,7 @@
             <button class="tab" data-tab="llm">LLM Services</button>
             <button class="tab" data-tab="execute">Execute</button>
             <button class="tab" data-tab="tasks">Task Queue</button>
+            <button class="tab" data-tab="settings">Settings</button>
         </div>
 
         <!-- Overview Tab -->
@@ -70,6 +71,22 @@
             </div>
         </div>
     </div>
+
+        <!-- Settings Tab -->
+        <div id="tab-settings" class="tab-content">
+            <div class="cmd-panel" style="max-width:560px">
+                <h3 style="margin-bottom:18px">HuggingFace Token</h3>
+                <p style="font-size:13px; color:var(--text-dim); margin-bottom:16px">
+                    Required for downloading gated models (e.g. MedGemma). The token is stored on the coordinator machine and injected at deploy time — never committed to git.
+                </p>
+                <div id="hf-token-status" style="margin-bottom:14px; font-size:13px; color:var(--text-dim)">Checking...</div>
+                <div class="cmd-row" style="margin-bottom:10px">
+                    <input type="password" id="hf-token-input" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx" style="flex:1; font-family:var(--mono)">
+                    <button id="hf-token-save" onclick="saveHFToken()">Save</button>
+                </div>
+                <button id="hf-token-clear" onclick="clearHFToken()" style="background:transparent; border:1px solid var(--red); color:var(--red); padding:6px 14px; border-radius:8px; font-size:13px; cursor:pointer; font-family:var(--font)">Clear Token</button>
+            </div>
+        </div>
 
     <script src="/static/js/app.js"></script>
 </body>

@@ -13,6 +13,7 @@ document.querySelectorAll('.tab').forEach(btn => {
         document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
         if (btn.dataset.tab === 'llm') loadLLMTab();
         if (btn.dataset.tab === 'tasks') loadTasks();
+        if (btn.dataset.tab === 'settings') loadSettings();
     });
 });
 
@@ -485,6 +486,44 @@ async function deployLLM() {
         const llmMachines = machines.filter(m => m.vllm_service_dir);
         updateMachineTable(llmMachines);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+async function loadSettings() {
+    const status = document.getElementById('hf-token-status');
+    try {
+        const s = await api('/api/settings');
+        status.innerHTML = s.hf_token_set
+            ? `Token set: <span style="font-family:var(--mono); color:var(--green)">${escapeHtml(s.hf_token_masked)}</span>`
+            : '<span style="color:var(--yellow)">No token set — gated models will fail to download.</span>';
+    } catch (e) {
+        status.textContent = 'Failed to load settings.';
+    }
+}
+
+async function saveHFToken() {
+    const input = document.getElementById('hf-token-input');
+    const btn = document.getElementById('hf-token-save');
+    const token = input.value.trim();
+    if (!token) return;
+    btn.disabled = true;
+    try {
+        await api('/api/settings/hf-token', { method: 'POST', body: JSON.stringify({ token }) });
+        input.value = '';
+        await loadSettings();
+    } catch (e) {
+        alert('Failed to save token: ' + e.message);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function clearHFToken() {
+    if (!confirm('Clear the HuggingFace token?')) return;
+    await api('/api/settings/hf-token', { method: 'DELETE' });
+    await loadSettings();
 }
 
 // ---------------------------------------------------------------------------

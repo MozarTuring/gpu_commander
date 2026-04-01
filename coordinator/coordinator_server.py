@@ -18,6 +18,26 @@ cfg: AppConfig = load_config()
 
 app = FastAPI(title="GPU Commander Coordinator")
 
+# ---------------------------------------------------------------------------
+# Secrets (HF token etc.) — stored outside git in .secrets.json
+# ---------------------------------------------------------------------------
+_SECRETS_FILE = Path(__file__).resolve().parent.parent / ".secrets.json"
+_hf_token: str = ""
+
+def _load_secrets() -> None:
+    global _hf_token
+    if _SECRETS_FILE.exists():
+        try:
+            data = json.loads(_SECRETS_FILE.read_text())
+            _hf_token = data.get("hf_token", "")
+        except Exception:
+            pass
+
+def _save_secrets() -> None:
+    _SECRETS_FILE.write_text(json.dumps({"hf_token": _hf_token}))
+
+_load_secrets()
+
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
@@ -192,6 +212,34 @@ async def cancel_task(name: str, task_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+class HFTokenRequest(BaseModel):
+    token: str
+
+@app.get("/api/settings")
+async def get_settings():
+    masked = f"hf_{'*' * 16}{_hf_token[-4:]}" if _hf_token else ""
+    return {"hf_token_set": bool(_hf_token), "hf_token_masked": masked}
+
+@app.post("/api/settings/hf-token")
+async def set_hf_token(req: HFTokenRequest):
+    global _hf_token
+    _hf_token = req.token.strip()
+    _save_secrets()
+    masked = f"hf_{'*' * 16}{_hf_token[-4:]}" if _hf_token else ""
+    return {"hf_token_set": bool(_hf_token), "hf_token_masked": masked}
+
+@app.delete("/api/settings/hf-token")
+async def delete_hf_token():
+    global _hf_token
+    _hf_token = ""
+    _save_secrets()
+    return {"hf_token_set": False}
+
+
+# ---------------------------------------------------------------------------
 # LLM Services
 # ---------------------------------------------------------------------------
 
@@ -289,10 +337,16 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest):
                                f"Stop a running model first.",
                     )
 
-    cmd = (
-        f"cd {vd} && "
-        f"sed 's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME=\"{req.model}\"/' remote.sh | bash"
-    )
+    sed_exprs = f's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME="{req.model}"/'
+    if _hf_token:
+        sed_exprs += f'; s/^export HUGGING_FACE_HUB_TOKEN=.*/export HUGGING_FACE_HUB_TOKEN="{_hf_token}"/'
+        sed_exprs += f'; s/^export HF_TOKEN=.*/export HF_TOKEN="{_hf_token}"/'
+    elif not _hf_token:
+        raise HTTPException(
+            status_code=400,
+            detail="No HuggingFace token configured. Set your HF token in Settings before deploying.",
+        )
+    cmd = f"cd {vd} && sed '{sed_exprs}' remote.sh | bash"
     result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
     return result
 
