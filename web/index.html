@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPU Commander</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="app-header">
+        <h1>GPU Commander</h1>
+        <div class="header-status">
+            <span id="lastUpdated">—</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab active" data-tab="overview">Overview</button>
+            <button class="tab" data-tab="execute">Execute</button>
+            <button class="tab" data-tab="tasks">Task Queue</button>
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-content active">
+            <div class="machines-grid" id="machinesGrid"></div>
+        </div>
+
+        <!-- Execute Tab -->
+        <div id="tab-execute" class="tab-content">
+            <div class="cmd-panel">
+                <h3>Run Command</h3>
+                <div class="cmd-row">
+                    <select id="cmdMachine"></select>
+                    <input type="text" id="cmdInput" placeholder="nvidia-smi" spellcheck="false">
+                    <button id="cmdRun">Run</button>
+                </div>
+                <div class="cmd-output" id="cmdOutput">Output will appear here...</div>
+            </div>
+        </div>
+
+        <!-- Task Queue Tab -->
+        <div id="tab-tasks" class="tab-content">
+            <div class="cmd-panel">
+                <h3>Submit Task</h3>
+                <div class="cmd-row">
+                    <select id="taskMachine"></select>
+                    <input type="text" id="taskInput" placeholder="python train.py --epochs 100" spellcheck="false">
+                    <button id="taskSubmit">Submit</button>
+                </div>
+            </div>
+            <div class="task-panel">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                    <h3 style="margin-bottom:0;">Tasks</h3>
+                    <div>
+                        <select id="taskFilterMachine" style="font-size:13px; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:var(--font);"></select>
+                    </div>
+                </div>
+                <div id="taskTableContainer">
+                    <div class="empty-state">No tasks yet</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
