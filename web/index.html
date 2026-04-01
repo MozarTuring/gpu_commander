@@ -6,24 +6,39 @@
     <title>GPU Commander</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
+    <div class="scanlines"></div>
+
     <header class="app-header">
-        <h1>GPU Commander</h1>
-        <div class="header-status">
-            <span id="lastUpdated">—</span>
+        <div class="header-brand">
+            <div class="brand-icon">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <rect x="2" y="2" width="7" height="7" rx="1" fill="currentColor" opacity=".9"/>
+                    <rect x="11" y="2" width="7" height="7" rx="1" fill="currentColor" opacity=".5"/>
+                    <rect x="2" y="11" width="7" height="7" rx="1" fill="currentColor" opacity=".5"/>
+                    <rect x="11" y="11" width="7" height="7" rx="1" fill="currentColor" opacity=".9"/>
+                </svg>
+            </div>
+            <h1>GPU<span>Commander</span></h1>
+        </div>
+        <div class="header-right">
+            <div class="header-status">
+                <span class="status-pulse"></span>
+                <span id="lastUpdated">Connecting...</span>
+            </div>
         </div>
     </header>
 
     <div class="container">
-        <div class="tabs">
+        <nav class="tabs">
             <button class="tab active" data-tab="overview">Overview</button>
             <button class="tab" data-tab="llm">LLM Services</button>
             <button class="tab" data-tab="execute">Execute</button>
             <button class="tab" data-tab="tasks">Task Queue</button>
             <button class="tab" data-tab="settings">Settings</button>
-        </div>
+        </nav>
 
         <!-- Overview Tab -->
         <div id="tab-overview" class="tab-content active">
@@ -37,8 +52,10 @@
 
         <!-- Execute Tab -->
         <div id="tab-execute" class="tab-content">
-            <div class="cmd-panel">
-                <h3>Run Command</h3>
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-label">Execute Command</span>
+                </div>
                 <div class="cmd-row">
                     <select id="cmdMachine"></select>
                     <input type="text" id="cmdInput" placeholder="nvidia-smi" spellcheck="false">
@@ -50,43 +67,45 @@
 
         <!-- Task Queue Tab -->
         <div id="tab-tasks" class="tab-content">
-            <div class="cmd-panel">
-                <h3>Submit Task</h3>
+            <div class="panel" style="margin-bottom:16px">
+                <div class="panel-header">
+                    <span class="panel-label">Submit Task</span>
+                </div>
                 <div class="cmd-row">
                     <select id="taskMachine"></select>
                     <input type="text" id="taskInput" placeholder="python train.py --epochs 100" spellcheck="false">
                     <button id="taskSubmit">Submit</button>
                 </div>
             </div>
-            <div class="task-panel">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                    <h3 style="margin-bottom:0;">Tasks</h3>
-                    <div>
-                        <select id="taskFilterMachine" style="font-size:13px; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:var(--font);"></select>
-                    </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-label">Tasks</span>
+                    <select id="taskFilterMachine" class="filter-select"></select>
                 </div>
                 <div id="taskTableContainer">
                     <div class="empty-state">No tasks yet</div>
                 </div>
             </div>
         </div>
-    </div>
 
         <!-- Settings Tab -->
         <div id="tab-settings" class="tab-content">
-            <div class="cmd-panel" style="max-width:560px">
-                <h3 style="margin-bottom:18px">HuggingFace Token</h3>
-                <p style="font-size:13px; color:var(--text-dim); margin-bottom:16px">
-                    Required for downloading gated models (e.g. MedGemma). The token is stored on the coordinator machine and injected at deploy time — never committed to git.
+            <div class="panel settings-panel">
+                <div class="panel-header">
+                    <span class="panel-label">HuggingFace Token</span>
+                </div>
+                <p class="settings-desc">
+                    Required for downloading gated models (e.g. MedGemma). Stored on the coordinator machine and injected at deploy time — never committed to git.
                 </p>
-                <div id="hf-token-status" style="margin-bottom:14px; font-size:13px; color:var(--text-dim)">Checking...</div>
+                <div id="hf-token-status" class="token-status">Checking...</div>
                 <div class="cmd-row" style="margin-bottom:10px">
-                    <input type="password" id="hf-token-input" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx" style="flex:1; font-family:var(--mono)">
+                    <input type="password" id="hf-token-input" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx" class="mono-input">
                     <button id="hf-token-save" onclick="saveHFToken()">Save</button>
                 </div>
-                <button id="hf-token-clear" onclick="clearHFToken()" style="background:transparent; border:1px solid var(--red); color:var(--red); padding:6px 14px; border-radius:8px; font-size:13px; cursor:pointer; font-family:var(--font)">Clear Token</button>
+                <button id="hf-token-clear" class="btn-danger" onclick="clearHFToken()">Clear Token</button>
             </div>
         </div>
+    </div>
 
     <script src="/static/js/app.js"></script>
 </body>

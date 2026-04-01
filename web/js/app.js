@@ -59,9 +59,9 @@ function renderMachines(data) {
 
     data.forEach(m => {
         const card = document.createElement('div');
-        card.className = 'machine-card';
-
         const online = m.online;
+        card.className = `machine-card ${online ? 'is-online' : 'is-offline'}`;
+
         const statusClass = online ? 'online' : 'offline';
         const statusText = online ? 'Online' : 'Offline';
 
@@ -376,10 +376,6 @@ function renderDeployPanel(llmMachines) {
         `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)} — ${escapeHtml(m.model)}</option>`
     ).join('');
 
-    const machineOptions = llmMachines.map(m =>
-        `<option value="${escapeHtml(m.name)}"${!m.online ? ' disabled' : ''}>${escapeHtml(m.name)}${m.online ? '' : ' (offline)'}</option>`
-    ).join('');
-
     return `
         <h3 style="margin-bottom:14px">Deploy Model</h3>
         <div class="cmd-row" style="margin-bottom:12px">
@@ -387,7 +383,6 @@ function renderDeployPanel(llmMachines) {
         </div>
         <div id="llm-machine-table" style="margin-bottom:12px"></div>
         <div class="cmd-row">
-            <select id="llm-machine-select">${machineOptions}</select>
             <button id="llm-deploy-btn" onclick="deployLLM()">Deploy</button>
         </div>
         <div class="cmd-output" id="llm-output" style="display:none; margin-top:10px"></div>
@@ -442,11 +437,9 @@ function updateMachineTable(llmMachines) {
         <td><span class="task-status ${r.fits ? 'completed' : r.status === 'offline' ? 'cancelled' : 'failed'}">${r.status}${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' ★' : ''}</span></td>
     </tr>`).join('')}</tbody></table>`;
 
-    // Auto-select best machine; disable Deploy if none fits
     const deployBtn = document.getElementById('llm-deploy-btn');
     if (_bestMachine) {
-        if (machineSel) machineSel.value = _bestMachine;
-        if (deployBtn) { deployBtn.disabled = false; deployBtn.title = ''; }
+        if (deployBtn) { deployBtn.disabled = false; deployBtn.title = `Will deploy on ${_bestMachine} GPU${_bestGpu}`; }
     } else {
         if (deployBtn) {
             deployBtn.disabled = true;
@@ -504,10 +497,9 @@ async function stopContainer(machineName, container) {
 
 async function deployLLM() {
     const model = document.getElementById('llm-model-select')?.value;
-    const machineName = document.getElementById('llm-machine-select')?.value;
     const btn = document.getElementById('llm-deploy-btn');
     const output = document.getElementById('llm-output');
-    if (!model || !machineName) return;
+    if (!model || !_bestMachine) return;
 
     btn.disabled = true;
     output.style.display = 'block';
@@ -515,13 +507,13 @@ async function deployLLM() {
 
     try {
         const body = { model };
-        if (_bestGpu !== null && machineName === _bestMachine) body.which_gpu = _bestGpu;
-        const task = await api(`/api/machines/${machineName}/llm/deploy`, {
+        if (_bestGpu !== null) body.which_gpu = _bestGpu;
+        const task = await api(`/api/machines/${_bestMachine}/llm/deploy`, {
             method: 'POST',
             body: JSON.stringify(body),
         });
         const gpuInfo = body.which_gpu !== undefined ? ` GPU${body.which_gpu}` : '';
-        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${machineName}${gpuInfo}\nModel: ${model}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
+        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${_bestMachine}${gpuInfo}\nModel: ${model}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
     } catch (err) {
         const msg = err.message.includes('409') || err.message.includes('Insufficient')
             ? `Deployment blocked: ${err.message.replace(/^\d+:\s*/, '')}`

@@ -8,5 +8,7 @@ rsync -av --delete-after --exclude-from='common_tools/rsync_exclude.txt' \
 
 # Deploy to peer machines — only when primary is ferragon to avoid recursion
 if [[ "$1" == "custodian2ferragon" ]]; then
-    source common_tools/meta_script.sh custodian2greatrawr gpu_commander remote_
+    for _peer in $(python3 -c "import yaml; cfg=yaml.safe_load(open('gpu_commander/config.yaml')); [print(n) for n in cfg['machines'] if n != 'custodian2ferragon']"); do
+        source common_tools/meta_script.sh "$_peer" gpu_commander remote_
+    done
 fi
