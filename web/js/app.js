@@ -329,7 +329,7 @@ function escapeHtml(str) {
 // ---------------------------------------------------------------------------
 // LLM Services
 // ---------------------------------------------------------------------------
-let _llmModels = [];      // fetched once from first vllm machine
+let _llmModels = (() => { try { return JSON.parse(localStorage.getItem('gpu_cmd_llm_models') || '[]'); } catch(_) { return []; } })();
 let _llmRunning = {};     // { machineName: [...containers] }
 
 async function loadLLMTab() {
@@ -341,8 +341,8 @@ async function loadLLMTab() {
         return;
     }
 
-    // Show loading state immediately before any async calls
-    if (_llmModels.length === 0) {
+    // Show loading state only if no cached models available
+    if (_llmModels.length === 0 && !grid.querySelector('.panel')) {
         grid.innerHTML = '<div class="empty-state">Loading LLM services...</div>';
     }
 
@@ -350,6 +350,7 @@ async function loadLLMTab() {
     const sourceMachine = llmMachines.find(m => m.online);
     if (sourceMachine && _llmModels.length === 0) {
         _llmModels = await api(`/api/machines/${sourceMachine.name}/llm/models`).catch(() => []);
+        if (_llmModels.length > 0) localStorage.setItem('gpu_cmd_llm_models', JSON.stringify(_llmModels));
     }
 
     // Fetch running containers + idle status in parallel
