@@ -319,7 +319,8 @@ async def stop_llm_container(name: str, req: LLMStopRequest):
 
 
 class LLMDeployRequest(BaseModel):
-    model: str  # env file stem, e.g. "qwen3dot5-35b-a3b"
+    model: str           # env file stem, e.g. "qwen3dot5-35b-a3b"
+    which_gpu: Optional[int] = None  # override VLLM_WHICH_GPU if provided
 
 
 @app.post("/api/machines/{name}/llm/deploy")
@@ -355,6 +356,8 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest):
                     )
 
     sed_exprs = f's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME="{req.model}"/'
+    if req.which_gpu is not None:
+        sed_exprs += f'; s/^VLLM_WHICH_GPU=.*/VLLM_WHICH_GPU={req.which_gpu}/'
     if _hf_token:
         sed_exprs += f'; s/^export HUGGING_FACE_HUB_TOKEN=.*/export HUGGING_FACE_HUB_TOKEN="{_hf_token}"/'
         sed_exprs += f'; s/^export HF_TOKEN=.*/export HF_TOKEN="{_hf_token}"/'

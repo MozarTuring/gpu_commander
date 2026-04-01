@@ -390,6 +390,9 @@ function renderDeployPanel(llmMachines) {
     `;
 }
 
+let _bestMachine = null;
+let _bestGpu = null;
+
 function updateMachineTable(llmMachines) {
     const modelSel = document.getElementById('llm-model-select');
     const machineSel = document.getElementById('llm-machine-select');
@@ -399,40 +402,46 @@ function updateMachineTable(llmMachines) {
     const model = _llmModels.find(m => m.name === modelSel.value);
     if (!model) { tableDiv.innerHTML = ''; return; }
 
-    const whichGpu = model.which_gpu ?? 0;
     const memUtil = model.memory_utilization ?? 0.85;
-
-    let bestMachine = null;
     let bestFree = -1;
+    _bestMachine = null;
+    _bestGpu = null;
 
-    const rows = llmMachines.map(m => {
-        if (!m.online) return { name: m.name, status: 'offline', gpuIdx: whichGpu, required: null, free: null, fits: false };
-
-        const gpu = m.gpu_cache?.gpus?.[whichGpu];
-        if (!gpu) return { name: m.name, status: 'no gpu data', gpuIdx: whichGpu, required: null, free: null, fits: false };
-
-        const required = Math.round(memUtil * gpu.memory_total_mib);
-        const free = gpu.memory_free_mib;
-        const fits = free >= required;
-
-        if (fits && free > bestFree) { bestFree = free; bestMachine = m.name; }
-        return { name: m.name, status: fits ? 'fits' : 'no fit', gpuIdx: whichGpu, required, free, fits };
-    });
+    // Expand each machine into one row per GPU
+    const rows = [];
+    for (const m of llmMachines) {
+        const gpus = m.gpu_cache?.gpus ?? [];
+        if (!m.online || gpus.length === 0) {
+            rows.push({ machine: m.name, gpuIdx: '—', required: null, free: null, fits: false, status: 'offline' });
+            continue;
+        }
+        for (const gpu of gpus) {
+            const required = Math.round(memUtil * gpu.memory_total_mib);
+            const free = gpu.memory_free_mib;
+            const fits = free >= required;
+            if (fits && free > bestFree) {
+                bestFree = free;
+                _bestMachine = m.name;
+                _bestGpu = gpu.index;
+            }
+            rows.push({ machine: m.name, gpuIdx: gpu.index, required, free, fits, status: fits ? 'fits' : 'no fit' });
+        }
+    }
 
     tableDiv.innerHTML = `<table class="task-table"><thead><tr>
         <th>Machine</th><th>GPU</th><th>Required</th><th>Free</th><th>Status</th>
-    </tr></thead><tbody>${rows.map(r => `<tr>
-        <td>${escapeHtml(r.name)}</td>
+    </tr></thead><tbody>${rows.map(r => `<tr${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' style="background:rgba(52,211,153,0.05)"' : ''}>
+        <td>${escapeHtml(r.machine)}</td>
         <td style="font-family:var(--mono)">${r.gpuIdx}</td>
         <td style="font-family:var(--mono)">${r.required != null ? r.required + ' MiB' : '—'}</td>
         <td style="font-family:var(--mono); color:${r.free != null ? (r.fits ? 'var(--green)' : 'var(--red)') : 'inherit'}">${r.free != null ? r.free + ' MiB' : '—'}</td>
-        <td><span class="task-status ${r.fits ? 'completed' : r.status === 'offline' ? 'cancelled' : 'failed'}">${r.status}</span></td>
+        <td><span class="task-status ${r.fits ? 'completed' : r.status === 'offline' ? 'cancelled' : 'failed'}">${r.status}${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' ★' : ''}</span></td>
     </tr>`).join('')}</tbody></table>`;
 
     // Auto-select best machine; disable Deploy if none fits
     const deployBtn = document.getElementById('llm-deploy-btn');
-    if (bestMachine) {
-        if (machineSel) machineSel.value = bestMachine;
+    if (_bestMachine) {
+        if (machineSel) machineSel.value = _bestMachine;
         if (deployBtn) { deployBtn.disabled = false; deployBtn.title = ''; }
     } else {
         if (deployBtn) {
@@ -486,11 +495,14 @@ async function deployLLM() {
     output.innerHTML = '<span class="spinner"></span> Submitting deploy task...';
 
     try {
+        const body = { model };
+        if (_bestGpu !== null && machineName === _bestMachine) body.which_gpu = _bestGpu;
         const task = await api(`/api/machines/${machineName}/llm/deploy`, {
             method: 'POST',
-            body: JSON.stringify({ model }),
+            body: JSON.stringify(body),
         });
-        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${machineName}\nModel: ${model}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
+        const gpuInfo = body.which_gpu !== undefined ? ` GPU${body.which_gpu}` : '';
+        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${machineName}${gpuInfo}\nModel: ${model}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
     } catch (err) {
         const msg = err.message.includes('409') || err.message.includes('Insufficient')
             ? `Deployment blocked: ${err.message.replace(/^\d+:\s*/, '')}`
