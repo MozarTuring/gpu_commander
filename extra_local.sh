@@ -3,7 +3,7 @@
 
 # Sync vllm_service to the primary host
 echo "Syncing vllm_service to $1..."
-rsync -av --delete-after --exclude-from='common_tools/rsync_exclude.txt' \
+rsync -av --exclude-from='common_tools/rsync_exclude.txt' \
     vllm_service/ "$1":${run_dir_pre}/vllm_service/
 
 # Deploy to peer machines and set up SSH tunnel — only when primary is ferragon to avoid recursion
