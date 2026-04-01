@@ -342,7 +342,7 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest):
     model_cfg = next((x for x in all_models if x["name"] == req.model), None)
 
     if model_cfg:
-        which_gpu = model_cfg.get("which_gpu", 0)
+        which_gpu = req.which_gpu if req.which_gpu is not None else model_cfg.get("which_gpu", 0)
         mem_util = model_cfg.get("memory_utilization", 0.85)
         gpu_status = _gpu_cache.get(name)
         if gpu_status:
