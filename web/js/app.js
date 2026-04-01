@@ -446,17 +446,32 @@ function renderRunningSection(m) {
     const containers = _llmRunning[m.name] || [];
     const rowsHtml = containers.length === 0
         ? `<div style="color:var(--text-dim); font-size:13px; margin-bottom:12px">No running containers</div>`
-        : `<table class="task-table" style="margin-bottom:12px"><thead><tr><th>Container</th><th>Status</th><th>Ports</th></tr></thead><tbody>
+        : `<table class="task-table" style="margin-bottom:12px"><thead><tr><th>Container</th><th>Status</th><th>Ports</th><th></th></tr></thead><tbody>
             ${containers.map(c => `<tr>
                 <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
                 <td style="font-size:12px">${escapeHtml(c.status)}</td>
                 <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
+                <td><button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button></td>
             </tr>`).join('')}
            </tbody></table>`;
     return `<div style="margin-bottom:12px">
         <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em">${escapeHtml(m.name)}</div>
         ${rowsHtml}
     </div>`;
+}
+
+async function stopContainer(machineName, container) {
+    if (!confirm(`Stop and remove container "${container}"?`)) return;
+    try {
+        await api(`/api/machines/${machineName}/llm/stop`, {
+            method: 'POST',
+            body: JSON.stringify({ container }),
+        });
+        _llmRunning[machineName] = (_llmRunning[machineName] || []).filter(c => c.name !== container);
+        loadLLMTab();
+    } catch (err) {
+        alert(`Failed to stop ${container}: ${err.message}`);
+    }
 }
 
 async function deployLLM() {

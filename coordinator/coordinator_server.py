@@ -301,6 +301,23 @@ async def list_running_llm(name: str):
     return containers
 
 
+class LLMStopRequest(BaseModel):
+    container: str  # exact container name, e.g. "qwen3dot5-35b-a3b-vllm-1"
+
+@app.post("/api/machines/{name}/llm/stop")
+async def stop_llm_container(name: str, req: LLMStopRequest):
+    m = _get_machine(name)
+    _require_vllm(m)
+    container = req.container
+    if not container or any(c in container for c in [';', '&', '|', '$', '`']):
+        raise HTTPException(status_code=400, detail="Invalid container name")
+    cmd = f"docker stop {container} && docker rm {container}"
+    result = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 30})
+    if result.get("exit_code", 0) != 0:
+        raise HTTPException(status_code=500, detail=result.get("stderr", "Failed to stop container"))
+    return {"stopped": container}
+
+
 class LLMDeployRequest(BaseModel):
     model: str  # env file stem, e.g. "qwen3dot5-35b-a3b"
 
