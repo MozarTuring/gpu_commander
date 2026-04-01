@@ -495,9 +495,6 @@ async def list_running_llm(name: str, user: dict = Depends(require_auth)):
         parts = line.split("\t")
         cname = parts[0] if len(parts) > 0 else ""
         owner = next((r["username"] for r in _deploy_records if r["machine"] == name and r["container"] == cname), None)
-        # Non-admin only sees containers they deployed
-        if user["role"] != "admin" and owner != user["username"]:
-            continue
         containers.append({
             "name": cname,
             "image": parts[1] if len(parts) > 1 else "",

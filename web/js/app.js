@@ -406,6 +406,7 @@ function renderDeployPanel(llmMachines) {
         <div class="cmd-row" style="margin-bottom:12px">
             <select id="llm-model-select" style="flex:2">${modelOptions}</select>
         </div>
+        <div id="llm-already-running" style="display:none; margin-bottom:10px; padding:8px 14px; background:var(--green-lo); border:1px solid rgba(16,217,160,.3); border-radius:8px; font-size:13px; color:var(--green)"></div>
         <div id="llm-machine-table" style="margin-bottom:12px; display:none"></div>
         <div class="cmd-row">
             <button id="llm-deploy-btn" onclick="deployLLM()">Deploy</button>
@@ -467,6 +468,26 @@ function updateMachineTable(llmMachines) {
         <td><span class="task-status ${r.fits ? 'completed' : r.status === 'offline' ? 'cancelled' : 'failed'}">${r.status}${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' ★' : ''}</span></td>
     </tr>`).join('')}</tbody></table>`;
 
+    // Check if this model is already running somewhere
+    const containerName = `${model.name}-vllm-1`;
+    let alreadyRunning = null;
+    for (const [machineName, containers] of Object.entries(_llmRunning)) {
+        const match = containers.find(c => c.name === containerName);
+        if (match) { alreadyRunning = { machine: machineName, container: match }; break; }
+    }
+
+    const alreadyEl = document.getElementById('llm-already-running');
+    if (alreadyEl) {
+        if (alreadyRunning) {
+            const owner = alreadyRunning.container.owner;
+            alreadyEl.style.display = 'block';
+            alreadyEl.innerHTML = `Already running on <strong>${escapeHtml(alreadyRunning.machine)}</strong>`
+                + (owner ? ` · deployed by <strong>${escapeHtml(owner)}</strong>` : '');
+        } else {
+            alreadyEl.style.display = 'none';
+        }
+    }
+
     const deployBtn = document.getElementById('llm-deploy-btn');
     if (deployBtn && _bestMachine) {
         deployBtn.disabled = false;
@@ -482,7 +503,7 @@ function renderRunningSection(m) {
     const timeoutHours = window._idleStatus?.timeout_hours ?? 2;
     const rowsHtml = containers.length === 0
         ? `<div style="color:var(--text-dim); font-size:13px; margin-bottom:12px">No running containers</div>`
-        : `<table class="task-table" style="margin-bottom:12px"><thead><tr><th>Container</th><th>Status</th><th>Ports</th><th>Idle</th><th></th></tr></thead><tbody>
+        : `<table class="task-table" style="margin-bottom:12px"><thead><tr><th>Container</th><th>Deployed by</th><th>Status</th><th>Ports</th><th>Idle</th><th></th></tr></thead><tbody>
             ${containers.map(c => {
                 const key = `${m.name}:${c.name}`;
                 const idle = idleData[key];
@@ -494,12 +515,17 @@ function renderRunningSection(m) {
                     const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--text-dim)';
                     idleHtml = `<span style="color:${color}; font-size:12px">${idleMin}m idle · stops in ${stopInMin}m</span>`;
                 }
+                const isOwner = c.owner === _currentUser?.username;
+                const stopBtn = isOwner || _currentUser?.role === 'admin'
+                    ? `<button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button>`
+                    : '';
                 return `<tr>
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
+                    <td style="font-size:12px; color:var(--text-dim)">${escapeHtml(c.owner || '—')}</td>
                     <td style="font-size:12px">${escapeHtml(c.status)}</td>
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
                     <td>${idleHtml}</td>
-                    <td><button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button></td>
+                    <td>${stopBtn}</td>
                 </tr>`;
             }).join('')}
            </tbody></table>`;
