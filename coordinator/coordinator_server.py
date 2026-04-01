@@ -203,6 +203,8 @@ for f in sorted(os.listdir(d)):
     if not f.endswith('.env'):
         continue
     name = f[:-4]
+    if not name:
+        continue
     env = {{}}
     with open(os.path.join(d, f)) as fp:
         for line in fp:
