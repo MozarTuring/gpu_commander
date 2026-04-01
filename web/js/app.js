@@ -428,8 +428,17 @@ function updateMachineTable(llmMachines) {
         <td><span class="task-status ${r.fits ? 'completed' : r.status === 'offline' ? 'cancelled' : 'failed'}">${r.status}</span></td>
     </tr>`).join('')}</tbody></table>`;
 
-    // Auto-select best machine
-    if (bestMachine && machineSel) machineSel.value = bestMachine;
+    // Auto-select best machine; disable Deploy if none fits
+    const deployBtn = document.getElementById('llm-deploy-btn');
+    if (bestMachine) {
+        if (machineSel) machineSel.value = bestMachine;
+        if (deployBtn) { deployBtn.disabled = false; deployBtn.title = ''; }
+    } else {
+        if (deployBtn) {
+            deployBtn.disabled = true;
+            deployBtn.title = 'No machine has enough free GPU memory. Stop a running model first.';
+        }
+    }
 }
 
 function renderRunningSection(m) {
@@ -467,9 +476,14 @@ async function deployLLM() {
         });
         output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${machineName}\nModel: ${model}\nStatus: ${task.status}\n\nDeploy is running in background. Check Task Queue tab for progress.`;
     } catch (err) {
-        output.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
+        const msg = err.message.includes('409') || err.message.includes('Insufficient')
+            ? `Deployment blocked: ${err.message.replace(/^\d+:\s*/, '')}`
+            : err.message;
+        output.innerHTML = `<span class="error">${escapeHtml(msg)}</span>`;
     } finally {
-        btn.disabled = false;
+        // Re-evaluate Deploy button state based on memory
+        const llmMachines = machines.filter(m => m.vllm_service_dir);
+        updateMachineTable(llmMachines);
     }
 }
 

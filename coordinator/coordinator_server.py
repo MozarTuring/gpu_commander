@@ -261,7 +261,34 @@ class LLMDeployRequest(BaseModel):
 async def deploy_llm_model(name: str, req: LLMDeployRequest):
     m = _get_machine(name)
     vd = _require_vllm(m)
-    # Override VLLM_SERVED_MODEL_NAME via sed so remote.sh uses the selected model
+
+    # Fetch model config to check memory requirement
+    list_cmd = _LIST_MODELS_CMD.format(vllm_dir=vd)
+    list_result = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
+    try:
+        all_models = json.loads(list_result["stdout"])
+    except Exception:
+        all_models = []
+    model_cfg = next((x for x in all_models if x["name"] == req.model), None)
+
+    if model_cfg:
+        which_gpu = model_cfg.get("which_gpu", 0)
+        mem_util = model_cfg.get("memory_utilization", 0.85)
+        gpu_status = _gpu_cache.get(name)
+        if gpu_status:
+            gpus = gpu_status.get("gpus", [])
+            if which_gpu < len(gpus):
+                gpu = gpus[which_gpu]
+                required_mib = round(mem_util * gpu["memory_total_mib"])
+                free_mib = gpu["memory_free_mib"]
+                if free_mib < required_mib:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Insufficient GPU memory on {name} GPU{which_gpu}: "
+                               f"need {required_mib} MiB, only {free_mib} MiB free. "
+                               f"Stop a running model first.",
+                    )
+
     cmd = (
         f"cd {vd} && "
         f"sed 's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME=\"{req.model}\"/' remote.sh | bash"
