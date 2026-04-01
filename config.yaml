@@ -6,22 +6,22 @@ coordinator:
 auth:
   token: "gpu-commander-secret-change-me"
 
-# The coordinator reaches agents via SSH tunnels:
-#   ssh -f -N -L 9850:localhost:9850 custodian2ferragon
-#   ssh -f -N -L 9851:localhost:9850 custodian2greatrawr
-# Then both agents are accessible on localhost from your Mac.
+# Coordinator runs on custodian2ferragon.
+# - ferragon agent is on the same host -> localhost:9850
+# - greatrawr agent is reached directly by hostname -> port 9850
+# Access the coordinator UI locally via: ssh -f -N -L 9800:localhost:9800 custodian2ferragon
 
 machines:
   custodian2ferragon:
-    host: localhost             # accessed via SSH tunnel
-    agent_port: 9850            # local tunnel port -> remote 9850
+    host: localhost             # coordinator co-located with this agent
+    agent_port: 9850
     ssh_alias: custodian2ferragon
     remote_dir: /home/custodian/project_remote_jwm/gpu_commander/agent
     description: "ferragon.stellar.research.liu.se"
 
   custodian2greatrawr:
-    host: localhost             # accessed via SSH tunnel
-    agent_port: 9851            # local tunnel port -> remote 9850
+    host: greatrawr.stellar.research.liu.se   # direct hostname from ferragon
+    agent_port: 9850
     ssh_alias: custodian2greatrawr
     remote_dir: /home/custodian/project_remote_jwm/gpu_commander/agent
     description: "greatrawr.stellar.research.liu.se"

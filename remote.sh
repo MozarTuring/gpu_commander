@@ -58,10 +58,36 @@ echo "Agent started — PID: ${AGENT_PID}"
 
 sleep 3
 
-# Verify
+# Verify agent
 if curl -sf "http://localhost:${AGENT_PORT}/health" >/dev/null 2>&1; then
     echo "Agent is UP on port ${AGENT_PORT}"
 else
     echo "WARNING: Agent may not have started. Check ${AGENT_DIR}/agent.log"
     tail -20 "${AGENT_DIR}/agent.log" 2>/dev/null || true
+fi
+
+# Start coordinator
+COORDINATOR_PORT=$(python3 -c "
+import yaml
+with open('${CONFIG_FILE}') as f:
+    cfg = yaml.safe_load(f)
+print(cfg.get('coordinator', {}).get('port', 9800))
+" 2>/dev/null || echo 9800)
+
+echo "Coordinator port: ${COORDINATOR_PORT}"
+pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || true
+sleep 1
+
+cd "${PROJ_DIR}/coordinator"
+GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
+nohup "${VENV_DIR}/bin/python3" -m uvicorn coordinator_server:app --host 0.0.0.0 --port "${COORDINATOR_PORT}" \
+    > "${PROJ_DIR}/coordinator.log" 2>&1 &
+echo "Coordinator started — PID: $!"
+
+sleep 3
+if curl -sf "http://localhost:${COORDINATOR_PORT}/api/machines" >/dev/null 2>&1; then
+    echo "Coordinator is UP on port ${COORDINATOR_PORT}"
+else
+    echo "WARNING: Coordinator may not have started. Check ${PROJ_DIR}/coordinator.log"
+    tail -20 "${PROJ_DIR}/coordinator.log" 2>/dev/null || true
 fi
