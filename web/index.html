@@ -11,6 +11,33 @@
 <body>
     <div class="scanlines"></div>
 
+    <!-- Login overlay -->
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-card">
+            <div class="login-brand">
+                <div class="brand-icon">
+                    <svg width="24" height="24" viewBox="0 0 20 20" fill="none">
+                        <rect x="2" y="2" width="7" height="7" rx="1" fill="currentColor" opacity=".9"/>
+                        <rect x="11" y="2" width="7" height="7" rx="1" fill="currentColor" opacity=".5"/>
+                        <rect x="2" y="11" width="7" height="7" rx="1" fill="currentColor" opacity=".5"/>
+                        <rect x="11" y="11" width="7" height="7" rx="1" fill="currentColor" opacity=".9"/>
+                    </svg>
+                </div>
+                <div class="login-title">GPU<span>Commander</span></div>
+            </div>
+            <div id="login-error" class="login-error"></div>
+            <div class="form-group">
+                <label class="form-label">Username</label>
+                <input type="text" id="login-username" class="form-input" autocomplete="username" placeholder="admin">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input type="password" id="login-password" class="form-input" autocomplete="current-password" placeholder="••••••••">
+            </div>
+            <button id="login-btn" class="login-btn" onclick="login()">Sign In</button>
+        </div>
+    </div>
+
     <header class="app-header">
         <div class="header-brand">
             <div class="brand-icon">
@@ -27,6 +54,10 @@
             <div class="header-status">
                 <span class="status-pulse"></span>
                 <span id="lastUpdated">Connecting...</span>
+            </div>
+            <div class="user-menu" id="userMenu" style="display:none">
+                <span class="user-badge" id="userBadge"></span>
+                <button class="logout-btn" onclick="logout()">Sign out</button>
             </div>
         </div>
     </header>
@@ -90,19 +121,50 @@
 
         <!-- Settings Tab -->
         <div id="tab-settings" class="tab-content">
-            <div class="panel settings-panel">
-                <div class="panel-header">
-                    <span class="panel-label">HuggingFace Token</span>
+            <div style="display:grid; gap:16px; max-width:600px">
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-label">HuggingFace Token</span>
+                    </div>
+                    <p class="settings-desc">
+                        Required for downloading gated models (e.g. MedGemma). Stored on the coordinator machine and injected at deploy time — never committed to git.
+                    </p>
+                    <div id="hf-token-status" class="token-status">Checking...</div>
+                    <div class="cmd-row" style="margin-bottom:10px">
+                        <input type="password" id="hf-token-input" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx" class="mono-input">
+                        <button id="hf-token-save" onclick="saveHFToken()">Save</button>
+                    </div>
+                    <button id="hf-token-clear" class="btn-danger" onclick="clearHFToken()">Clear Token</button>
                 </div>
-                <p class="settings-desc">
-                    Required for downloading gated models (e.g. MedGemma). Stored on the coordinator machine and injected at deploy time — never committed to git.
-                </p>
-                <div id="hf-token-status" class="token-status">Checking...</div>
-                <div class="cmd-row" style="margin-bottom:10px">
-                    <input type="password" id="hf-token-input" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx" class="mono-input">
-                    <button id="hf-token-save" onclick="saveHFToken()">Save</button>
+
+                <div class="panel" id="user-mgmt-panel" style="display:none">
+                    <div class="panel-header">
+                        <span class="panel-label">User Management</span>
+                    </div>
+                    <div id="user-list" class="user-list"></div>
+                    <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border)">
+                        <div class="panel-label" style="margin-bottom:10px">Create User</div>
+                        <div class="cmd-row" style="flex-wrap:wrap; gap:8px">
+                            <input type="text" id="new-username" placeholder="Username" style="flex:1; min-width:120px">
+                            <input type="password" id="new-password" placeholder="Password" style="flex:1; min-width:120px">
+                            <select id="new-role" style="width:100px">
+                                <option value="user">User</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                            <button onclick="createUser()">Create</button>
+                        </div>
+                    </div>
                 </div>
-                <button id="hf-token-clear" class="btn-danger" onclick="clearHFToken()">Clear Token</button>
+
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-label">Change Password</span>
+                    </div>
+                    <div class="cmd-row">
+                        <input type="password" id="change-pw-input" placeholder="New password" style="flex:1">
+                        <button onclick="changeOwnPassword()">Update</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

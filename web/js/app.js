@@ -1,6 +1,8 @@
 const API = '';
 let machines = [];
 let pollTimer = null;
+let _authToken = localStorage.getItem('gpu_cmd_token') || null;
+let _currentUser = null;
 
 // ---------------------------------------------------------------------------
 // Tabs
@@ -21,10 +23,13 @@ document.querySelectorAll('.tab').forEach(btn => {
 // Fetch helpers
 // ---------------------------------------------------------------------------
 async function api(path, opts = {}) {
-    const resp = await fetch(`${API}${path}`, {
-        headers: { 'Content-Type': 'application/json', ...opts.headers },
-        ...opts,
-    });
+    const headers = { 'Content-Type': 'application/json' };
+    if (_authToken) headers['Authorization'] = `Bearer ${_authToken}`;
+    const resp = await fetch(`${API}${path}`, { headers: { ...headers, ...opts.headers }, ...opts });
+    if (resp.status === 401) {
+        showLoginOverlay();
+        throw new Error('Not authenticated');
+    }
     if (!resp.ok) {
         const text = await resp.text();
         throw new Error(`${resp.status}: ${text}`);
@@ -547,6 +552,7 @@ async function loadSettings() {
     } catch (e) {
         status.textContent = 'Failed to load settings.';
     }
+    await loadUserManagement();
 }
 
 async function saveHFToken() {
@@ -573,6 +579,151 @@ async function clearHFToken() {
 }
 
 // ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+function showLoginOverlay() {
+    document.getElementById('login-overlay').style.display = 'flex';
+    document.getElementById('userMenu').style.display = 'none';
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function hideLoginOverlay() {
+    document.getElementById('login-overlay').style.display = 'none';
+}
+
+function updateUserDisplay() {
+    if (!_currentUser) return;
+    const menu = document.getElementById('userMenu');
+    const badge = document.getElementById('userBadge');
+    badge.textContent = `${_currentUser.username} · ${_currentUser.role}`;
+    menu.style.display = 'flex';
+}
+
+async function login() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errorEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-btn');
+    errorEl.textContent = '';
+    if (!username || !password) { errorEl.textContent = 'Enter username and password.'; return; }
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            errorEl.textContent = data.detail || 'Login failed';
+            return;
+        }
+        const data = await resp.json();
+        _authToken = data.token;
+        _currentUser = { username: data.username, role: data.role };
+        localStorage.setItem('gpu_cmd_token', _authToken);
+        hideLoginOverlay();
+        updateUserDisplay();
+        document.getElementById('login-password').value = '';
+        startPolling();
+    } catch (e) {
+        errorEl.textContent = 'Connection error';
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+document.getElementById('login-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') login();
+});
+document.getElementById('login-username').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('login-password').focus();
+});
+
+async function logout() {
+    try { await api('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+    _authToken = null;
+    _currentUser = null;
+    localStorage.removeItem('gpu_cmd_token');
+    showLoginOverlay();
+}
+
+// ---------------------------------------------------------------------------
+// User management (admin only)
+// ---------------------------------------------------------------------------
+async function loadUserManagement() {
+    const panel = document.getElementById('user-mgmt-panel');
+    if (_currentUser?.role !== 'admin') { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    const listEl = document.getElementById('user-list');
+    try {
+        const users = await api('/api/admin/users');
+        listEl.innerHTML = users.map(u => `
+            <div class="user-row">
+                <div class="user-row-info">
+                    <span class="user-row-name">${escapeHtml(u.username)}</span>
+                    <span class="role-badge ${u.role}">${u.role}</span>
+                </div>
+                ${u.username !== _currentUser.username ? `<button class="cancel-btn" onclick="deleteUser('${escapeHtml(u.username)}')">Delete</button>` : ''}
+            </div>`).join('');
+    } catch (e) {
+        listEl.innerHTML = `<div class="empty-state">Failed to load users</div>`;
+    }
+}
+
+async function createUser() {
+    const username = document.getElementById('new-username').value.trim();
+    const password = document.getElementById('new-password').value;
+    const role = document.getElementById('new-role').value;
+    if (!username || !password) { alert('Username and password are required.'); return; }
+    try {
+        await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, role }) });
+        document.getElementById('new-username').value = '';
+        document.getElementById('new-password').value = '';
+        await loadUserManagement();
+    } catch (e) {
+        alert('Failed to create user: ' + e.message);
+    }
+}
+
+async function deleteUser(username) {
+    if (!confirm(`Delete user "${username}"?`)) return;
+    try {
+        await api(`/api/admin/users/${username}`, { method: 'DELETE' });
+        await loadUserManagement();
+    } catch (e) {
+        alert('Failed to delete user: ' + e.message);
+    }
+}
+
+async function changeOwnPassword() {
+    const pw = document.getElementById('change-pw-input').value;
+    if (!pw) return;
+    try {
+        await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ new_password: pw }) });
+        document.getElementById('change-pw-input').value = '';
+        alert('Password updated. Please log in again.');
+        await logout();
+    } catch (e) {
+        alert('Failed: ' + e.message);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-startPolling();
+(async () => {
+    if (!_authToken) { showLoginOverlay(); return; }
+    try {
+        const me = await fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${_authToken}` }
+        });
+        if (!me.ok) { showLoginOverlay(); return; }
+        _currentUser = await me.json();
+        hideLoginOverlay();
+        updateUserDisplay();
+        startPolling();
+    } catch (_) {
+        showLoginOverlay();
+    }
+})();

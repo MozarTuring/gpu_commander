@@ -1,12 +1,14 @@
 """GPU Commander Coordinator — central server running on your Mac."""
 
 import asyncio
+import hashlib
 import json
+import secrets as _secrets
 import time
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -38,8 +40,90 @@ def _save_secrets() -> None:
 
 _load_secrets()
 
+# ---------------------------------------------------------------------------
+# User management & authentication
+# ---------------------------------------------------------------------------
+_USERS_FILE = Path(__file__).resolve().parent.parent / "users.json"
+_sessions: dict[str, dict] = {}   # token -> {username, role, expires_at}
+_SESSION_TTL = 30 * 24 * 3600     # 30 days
+
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
+
+def _load_users() -> dict:
+    if _USERS_FILE.exists():
+        try:
+            return json.loads(_USERS_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+def _save_users(users: dict) -> None:
+    _USERS_FILE.write_text(json.dumps(users, indent=2))
+
+def _bootstrap_admin() -> None:
+    users = _load_users()
+    if not users:
+        password = _secrets.token_urlsafe(12)
+        salt = _secrets.token_hex(16)
+        users["admin"] = {
+            "password_hash": _hash_password(password, salt),
+            "salt": salt,
+            "role": "admin",
+        }
+        _save_users(users)
+        print(f"\n{'='*52}")
+        print(f"  ADMIN CREDENTIALS (first-time setup)")
+        print(f"  Username : admin")
+        print(f"  Password : {password}")
+        print(f"  Change this after first login!")
+        print(f"{'='*52}\n")
+
+_bootstrap_admin()
+
+def _get_session(token: str) -> dict | None:
+    s = _sessions.get(token)
+    if s and s["expires_at"] > time.time():
+        return s
+    if s:
+        del _sessions[token]
+    return None
+
+# Paths that don't need authentication
+_UNPROTECTED = {"/", "/api/auth/login"}
+
+def _check_request_auth(request: Request) -> dict | None:
+    """Return session dict if authenticated, else None."""
+    # Backward-compat: agent-to-coordinator calls use X-Agent-Token
+    if request.headers.get("X-Agent-Token") == cfg.auth_token:
+        return {"username": "_agent", "role": "admin"}
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return _get_session(auth[7:])
+    return None
+
+def require_auth(request: Request) -> dict:
+    user = _check_request_auth(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+def require_admin(user: dict = Depends(require_auth)) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.url.path in _UNPROTECTED or request.url.path.startswith("/static/"):
+        return await call_next(request)
+    if not _check_request_auth(request):
+        return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+    return await call_next(request)
 
 # Cached GPU status per machine
 _gpu_cache: dict[str, dict] = {}
@@ -93,6 +177,116 @@ def _get_machine(name: str) -> MachineConfig:
 async def dashboard():
     index = WEB_DIR / "index.html"
     return HTMLResponse(index.read_text())
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest):
+    users = _load_users()
+    user = users.get(req.username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    expected = _hash_password(req.password, user["salt"])
+    if expected != user["password_hash"]:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = _secrets.token_urlsafe(32)
+    _sessions[token] = {
+        "username": req.username,
+        "role": user["role"],
+        "expires_at": time.time() + _SESSION_TTL,
+    }
+    return {"token": token, "username": req.username, "role": user["role"]}
+
+@app.post("/api/auth/logout")
+async def logout(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        _sessions.pop(auth[7:], None)
+    return {"ok": True}
+
+@app.get("/api/auth/me")
+async def me(user: dict = Depends(require_auth)):
+    return {"username": user["username"], "role": user["role"]}
+
+
+# ---------------------------------------------------------------------------
+# User management (admin only)
+# ---------------------------------------------------------------------------
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"  # "user" or "admin"
+
+class ChangePasswordRequest(BaseModel):
+    new_password: str
+
+@app.get("/api/admin/users")
+async def list_users(_: dict = Depends(require_admin)):
+    users = _load_users()
+    return [{"username": u, "role": d["role"]} for u, d in users.items()]
+
+@app.post("/api/admin/users")
+async def create_user(req: CreateUserRequest, _: dict = Depends(require_admin)):
+    if req.role not in ("user", "admin"):
+        raise HTTPException(status_code=400, detail="role must be 'user' or 'admin'")
+    users = _load_users()
+    if req.username in users:
+        raise HTTPException(status_code=409, detail=f"User '{req.username}' already exists")
+    salt = _secrets.token_hex(16)
+    users[req.username] = {
+        "password_hash": _hash_password(req.password, salt),
+        "salt": salt,
+        "role": req.role,
+    }
+    _save_users(users)
+    return {"username": req.username, "role": req.role}
+
+@app.delete("/api/admin/users/{username}")
+async def delete_user(username: str, current: dict = Depends(require_admin)):
+    if username == current["username"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    users = _load_users()
+    if username not in users:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+    del users[username]
+    _save_users(users)
+    # Invalidate any active sessions for this user
+    for token, s in list(_sessions.items()):
+        if s["username"] == username:
+            del _sessions[token]
+    return {"deleted": username}
+
+@app.post("/api/admin/users/{username}/password")
+async def reset_password(username: str, req: ChangePasswordRequest, _: dict = Depends(require_admin)):
+    users = _load_users()
+    if username not in users:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+    salt = _secrets.token_hex(16)
+    users[username]["password_hash"] = _hash_password(req.new_password, salt)
+    users[username]["salt"] = salt
+    _save_users(users)
+    for token, s in list(_sessions.items()):
+        if s["username"] == username:
+            del _sessions[token]
+    return {"ok": True}
+
+@app.post("/api/auth/change-password")
+async def change_own_password(req: ChangePasswordRequest, user: dict = Depends(require_auth)):
+    users = _load_users()
+    username = user["username"]
+    if username not in users:
+        raise HTTPException(status_code=404, detail="User not found")
+    salt = _secrets.token_hex(16)
+    users[username]["password_hash"] = _hash_password(req.new_password, salt)
+    users[username]["salt"] = salt
+    _save_users(users)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
