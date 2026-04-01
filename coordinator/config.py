@@ -28,10 +28,17 @@ class CoordinatorConfig:
 
 
 @dataclass
+class LLMIdleConfig:
+    timeout_hours: float = 2.0
+    check_interval_hours: float = 0.5
+
+
+@dataclass
 class AppConfig:
     coordinator: CoordinatorConfig = field(default_factory=CoordinatorConfig)
     auth_token: str = "gpu-commander-secret-change-me"
     machines: dict[str, MachineConfig] = field(default_factory=dict)
+    llm_idle: LLMIdleConfig = field(default_factory=LLMIdleConfig)
 
 
 def load_config(config_path: str | None = None) -> AppConfig:
@@ -64,4 +71,10 @@ def load_config(config_path: str | None = None) -> AppConfig:
             vllm_service_dir=m.get("vllm_service_dir", ""),
         )
 
-    return AppConfig(coordinator=coordinator, auth_token=auth_token, machines=machines)
+    idle_raw = raw.get("llm_idle", {})
+    llm_idle = LLMIdleConfig(
+        timeout_hours=idle_raw.get("timeout_hours", 2.0),
+        check_interval_hours=idle_raw.get("check_interval_hours", 0.5),
+    )
+
+    return AppConfig(coordinator=coordinator, auth_token=auth_token, machines=machines, llm_idle=llm_idle)

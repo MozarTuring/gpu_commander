@@ -4,6 +4,10 @@ coordinator:
   poll_interval: 10  # seconds between GPU status polls
   host_machine: "custodian2ferragon"  # only this machine runs the coordinator
 
+llm_idle:
+  timeout_hours: 2      # stop a model after this many hours of inactivity
+  check_interval_hours: 0.5  # how often to run the idle check
+
 auth:
   token: "gpu-commander-secret-change-me"
 

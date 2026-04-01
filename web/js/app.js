@@ -332,14 +332,18 @@ async function loadLLMTab() {
         _llmModels = await api(`/api/machines/${sourceMachine.name}/llm/models`).catch(() => []);
     }
 
-    // Fetch running containers for all machines in parallel
-    const runningResults = await Promise.all(
-        llmMachines.map(m => m.online
-            ? api(`/api/machines/${m.name}/llm/running`).then(r => [m.name, r]).catch(() => [m.name, []])
-            : Promise.resolve([m.name, []])
-        )
-    );
+    // Fetch running containers + idle status in parallel
+    const [runningResults, idleStatus] = await Promise.all([
+        Promise.all(
+            llmMachines.map(m => m.online
+                ? api(`/api/machines/${m.name}/llm/running`).then(r => [m.name, r]).catch(() => [m.name, []])
+                : Promise.resolve([m.name, []])
+            )
+        ),
+        api('/api/llm/idle-status').catch(() => ({ containers: {}, timeout_hours: 2 })),
+    ]);
     runningResults.forEach(([name, containers]) => { _llmRunning[name] = containers; });
+    window._idleStatus = idleStatus;
 
     grid.innerHTML = '';
 
@@ -453,15 +457,30 @@ function updateMachineTable(llmMachines) {
 
 function renderRunningSection(m) {
     const containers = _llmRunning[m.name] || [];
+    const idleData = window._idleStatus?.containers ?? {};
+    const timeoutHours = window._idleStatus?.timeout_hours ?? 2;
     const rowsHtml = containers.length === 0
         ? `<div style="color:var(--text-dim); font-size:13px; margin-bottom:12px">No running containers</div>`
-        : `<table class="task-table" style="margin-bottom:12px"><thead><tr><th>Container</th><th>Status</th><th>Ports</th><th></th></tr></thead><tbody>
-            ${containers.map(c => `<tr>
-                <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
-                <td style="font-size:12px">${escapeHtml(c.status)}</td>
-                <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
-                <td><button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button></td>
-            </tr>`).join('')}
+        : `<table class="task-table" style="margin-bottom:12px"><thead><tr><th>Container</th><th>Status</th><th>Ports</th><th>Idle</th><th></th></tr></thead><tbody>
+            ${containers.map(c => {
+                const key = `${m.name}:${c.name}`;
+                const idle = idleData[key];
+                let idleHtml = '<span style="color:var(--text-dim)">—</span>';
+                if (idle) {
+                    const idleMin = idle.idle_minutes;
+                    const stopInMin = Math.round(idle.will_stop_in_seconds / 60);
+                    const pct = Math.min(100, (idleMin / (timeoutHours * 60)) * 100);
+                    const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--text-dim)';
+                    idleHtml = `<span style="color:${color}; font-size:12px">${idleMin}m idle · stops in ${stopInMin}m</span>`;
+                }
+                return `<tr>
+                    <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
+                    <td style="font-size:12px">${escapeHtml(c.status)}</td>
+                    <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
+                    <td>${idleHtml}</td>
+                    <td><button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button></td>
+                </tr>`;
+            }).join('')}
            </tbody></table>`;
     return `<div style="margin-bottom:12px">
         <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em">${escapeHtml(m.name)}</div>

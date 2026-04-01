@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
-from config import load_config, AppConfig, MachineConfig
+from config import load_config, AppConfig, MachineConfig, LLMIdleConfig
 
 cfg: AppConfig = load_config()
 
@@ -45,6 +45,10 @@ app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 _gpu_cache: dict[str, dict] = {}
 _gpu_cache_ts: dict[str, float] = {}
 _machine_online: dict[str, bool] = {}
+
+# Idle tracking: "machine:container" -> last_active timestamp
+_container_last_active: dict[str, float] = {}
+_idle_log: list[dict] = []  # recent auto-stop events
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +376,80 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest):
 
 
 # ---------------------------------------------------------------------------
+# Idle auto-stop
+# ---------------------------------------------------------------------------
+
+@app.get("/api/llm/idle-status")
+async def get_idle_status():
+    now = time.time()
+    timeout_s = cfg.llm_idle.timeout_hours * 3600
+    return {
+        "timeout_hours": cfg.llm_idle.timeout_hours,
+        "check_interval_hours": cfg.llm_idle.check_interval_hours,
+        "containers": {
+            key: {
+                "idle_seconds": round(now - ts),
+                "idle_minutes": round((now - ts) / 60),
+                "will_stop_in_seconds": max(0, round(timeout_s - (now - ts))),
+            }
+            for key, ts in _container_last_active.items()
+        },
+        "recent_stops": _idle_log[-20:],
+    }
+
+
+async def _check_idle_containers():
+    now = time.time()
+    timeout_s = cfg.llm_idle.timeout_hours * 3600
+    check_minutes = max(1, int(cfg.llm_idle.check_interval_hours * 60))
+
+    for machine_name, m in cfg.machines.items():
+        if not m.vllm_service_dir or not _machine_online.get(machine_name):
+            continue
+
+        # List only vllm containers (image vllm-rtx5090:latest)
+        list_cmd = "docker ps --filter 'ancestor=vllm-rtx5090:latest' --format '{{.Names}}' 2>/dev/null || true"
+        try:
+            res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
+            containers = [l.strip() for l in res.get("stdout", "").splitlines() if l.strip()]
+        except Exception:
+            continue
+
+        for container in containers:
+            key = f"{machine_name}:{container}"
+
+            # Check for recent inference activity via "Finished request" in logs
+            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -c 'Finished request' || echo 0"
+            try:
+                res = await _agent_request(m, "POST", "/execute", json_body={"command": activity_cmd, "timeout": 10})
+                count = int(res.get("stdout", "0").strip())
+            except Exception:
+                count = 0
+
+            if count > 0 or key not in _container_last_active:
+                _container_last_active[key] = now
+
+            idle_s = now - _container_last_active[key]
+            if idle_s >= timeout_s:
+                stop_cmd = f"docker stop {container} && docker rm {container}"
+                try:
+                    await _agent_request(m, "POST", "/execute", json_body={"command": stop_cmd, "timeout": 30})
+                    event = {"time": now, "machine": machine_name, "container": container, "idle_hours": round(idle_s / 3600, 2)}
+                    _idle_log.append(event)
+                    del _container_last_active[key]
+                    print(f"[idle-stop] {machine_name}:{container} idle {idle_s/3600:.1f}h — stopped")
+                except Exception as e:
+                    print(f"[idle-stop] failed to stop {machine_name}:{container}: {e}")
+
+
+async def _idle_checker_loop():
+    check_interval_s = cfg.llm_idle.check_interval_hours * 3600
+    while True:
+        await asyncio.sleep(check_interval_s)
+        await _check_idle_containers()
+
+
+# ---------------------------------------------------------------------------
 # Background poller
 # ---------------------------------------------------------------------------
 async def _poll_gpu_status():
@@ -390,6 +468,7 @@ async def _poll_gpu_status():
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(_poll_gpu_status())
+    asyncio.create_task(_idle_checker_loop())
 
 
 # ---------------------------------------------------------------------------
