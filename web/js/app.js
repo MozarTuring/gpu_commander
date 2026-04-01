@@ -537,7 +537,7 @@ function renderRunningSection(m) {
                     ? `<button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button>`
                     : '';
                 const hostPort = (c.ports.match(/:(\d+)->/) || [])[1] || '';
-                const sshHost = `[stellar_account]@${m.description || m.host}`;
+                const sshHost = `${_currentUser?.stellar_account || '[stellar_account]'}@${m.description || m.host}`;
                 const accessHint = hostPort ? `<tr>
                     <td colspan="6" style="padding:0 12px 10px; border-bottom:1px solid var(--border)">
                         <div style="font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--bg); border-radius:6px; padding:8px 12px; line-height:1.8">
