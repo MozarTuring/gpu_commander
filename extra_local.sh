@@ -1,10 +1,15 @@
 # Extra local steps when deploying gpu_commander.
 # Sourced by meta_script.sh — has access to $1 (primary host), $run_dir_pre, $last_commit, $run_id, _git_branch, _remote_proj.
 
-# Sync vllm_service to the primary host
-echo "Syncing vllm_service to $1..."
+# Sync vllm_service to branch-specific dir based on vllm_service's own branch name
+_vllm_branch=$(git -C vllm_service rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+echo "Syncing vllm_service to $1 (vllm_service_${_vllm_branch})..."
 rsync -av --exclude-from='common_tools/rsync_exclude.txt' \
-    vllm_service/ "$1":${run_dir_pre}/vllm_service/
+    vllm_service/ "$1":${run_dir_pre}/vllm_service_${_vllm_branch}/
+
+# Patch vllm_service_dir in the remote config to match where we just rsynced
+ssh "$1" "sed -i 's|vllm_service_dir:.*|vllm_service_dir: ${run_dir_pre}/vllm_service_${_vllm_branch}|g' \
+    ${run_dir_pre}/${_remote_proj}/config*.yaml 2>/dev/null || true"
 
 # Deploy to peer machines and set up SSH tunnel — only when primary is ferragon to avoid recursion
 if [[ "$1" == "custodian2ferragon" ]]; then
