@@ -22,6 +22,9 @@ else
 fi
 echo "Using config: ${CONFIG_FILE}"
 
+# Write deploy version so coordinator can serve it via /api/version
+echo "${JWM_COMMIT_ID_L}" > "${PROJ_DIR}/version.txt"
+
 # Create/reuse venv and install deps
 if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
     echo "Creating virtualenv at ${VENV_DIR}..."

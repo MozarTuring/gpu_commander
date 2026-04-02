@@ -1,7 +1,9 @@
 """GPU Commander Coordinator — central server running on your Mac."""
 
 import asyncio
+import base64 as _base64
 import hashlib
+import hmac as _hmac
 import json
 import secrets as _secrets
 import time
@@ -44,8 +46,47 @@ _load_secrets()
 # User management & authentication
 # ---------------------------------------------------------------------------
 _USERS_FILE = Path(__file__).resolve().parent.parent / "users.json"
-_sessions: dict[str, dict] = {}   # token -> {username, role, expires_at}
-_SESSION_TTL = 30 * 24 * 3600     # 30 days
+_SESSION_TTL = 30 * 24 * 3600     # 30 days — JWT expiry
+
+# ---------------------------------------------------------------------------
+# JWT (HS256, stdlib only — no PyJWT dependency)
+# ---------------------------------------------------------------------------
+def _b64url_encode(data: bytes) -> str:
+    return _base64.urlsafe_b64encode(data).rstrip(b'=').decode()
+
+def _b64url_decode(s: str) -> bytes:
+    pad = 4 - len(s) % 4
+    return _base64.urlsafe_b64decode(s + '=' * (pad % 4))
+
+def _jwt_create(payload: dict) -> str:
+    header = _b64url_encode(b'{"alg":"HS256","typ":"JWT"}')
+    body = _b64url_encode(json.dumps(payload, separators=(',', ':')).encode())
+    signing_input = f"{header}.{body}"
+    sig = _b64url_encode(_hmac.new(cfg.auth_token.encode(), signing_input.encode(), hashlib.sha256).digest())
+    return f"{signing_input}.{sig}"
+
+def _jwt_verify(token: str) -> dict | None:
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            return None
+        header, body, sig = parts
+        signing_input = f"{header}.{body}"
+        expected = _b64url_encode(_hmac.new(cfg.auth_token.encode(), signing_input.encode(), hashlib.sha256).digest())
+        if not _hmac.compare_digest(sig, expected):
+            return None
+        payload = json.loads(_b64url_decode(body))
+        if payload.get('exp', 0) < time.time():
+            return None
+        return payload
+    except Exception:
+        return None
+
+# ---------------------------------------------------------------------------
+# Server version (written to version.txt by remote.sh at deploy time)
+# ---------------------------------------------------------------------------
+_VERSION_FILE = Path(__file__).resolve().parent.parent / "version.txt"
+_SERVER_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "unknown"
 
 def _hash_password(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
@@ -81,25 +122,17 @@ def _bootstrap_admin() -> None:
 
 _bootstrap_admin()
 
-def _get_session(token: str) -> dict | None:
-    s = _sessions.get(token)
-    if s and s["expires_at"] > time.time():
-        return s
-    if s:
-        del _sessions[token]
-    return None
-
 # Paths that don't need authentication
-_UNPROTECTED = {"/", "/api/auth/login"}
+_UNPROTECTED = {"/", "/api/auth/login", "/api/version"}
 
 def _check_request_auth(request: Request) -> dict | None:
-    """Return session dict if authenticated, else None."""
-    # Backward-compat: agent-to-coordinator calls use X-Agent-Token
+    """Return user dict if authenticated, else None."""
+    # Agent-to-coordinator calls use X-Agent-Token
     if request.headers.get("X-Agent-Token") == cfg.auth_token:
         return {"username": "_agent", "role": "admin"}
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
-        return _get_session(auth[7:])
+        return _jwt_verify(auth[7:])
     return None
 
 def require_auth(request: Request) -> dict:
@@ -211,20 +244,22 @@ async def login(req: LoginRequest):
     expected = _hash_password(req.password, user["salt"])
     if expected != user["password_hash"]:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    token = _secrets.token_urlsafe(32)
-    _sessions[token] = {
+    token = _jwt_create({
         "username": req.username,
         "role": user["role"],
-        "expires_at": time.time() + _SESSION_TTL,
-    }
+        "iat": int(time.time()),
+        "exp": int(time.time()) + _SESSION_TTL,
+    })
     return {"token": token, "username": req.username, "role": user["role"]}
 
 @app.post("/api/auth/logout")
-async def logout(request: Request):
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        _sessions.pop(auth[7:], None)
+async def logout():
+    # JWT is stateless — client simply discards the token
     return {"ok": True}
+
+@app.get("/api/version")
+async def version():
+    return {"version": _SERVER_VERSION}
 
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(require_auth)):

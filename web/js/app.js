@@ -3,6 +3,7 @@ let machines = [];
 let pollTimer = null;
 let _authToken = localStorage.getItem('gpu_cmd_token') || null;
 let _currentUser = null;
+let _serverVersion = null;  // set on first poll, triggers reload if it changes
 
 // ---------------------------------------------------------------------------
 // Tabs
@@ -302,11 +303,24 @@ async function refresh() {
     }
 }
 
+async function checkVersion() {
+    try {
+        const data = await fetch('/api/version').then(r => r.json());
+        if (_serverVersion === null) {
+            _serverVersion = data.version;
+        } else if (data.version !== _serverVersion) {
+            window.location.reload();
+        }
+    } catch (_) {}
+}
+
 function startPolling(interval = 10000) {
     refresh();
+    checkVersion();
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(() => {
         refresh();
+        checkVersion();
         const activeTab = document.querySelector('.tab.active')?.dataset.tab;
         if (activeTab === 'tasks') loadTasks();
         if (activeTab === 'llm') loadLLMTab();
