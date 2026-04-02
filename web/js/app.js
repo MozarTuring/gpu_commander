@@ -375,17 +375,19 @@ async function loadLLMTab() {
     deployPanel.innerHTML = renderDeployPanel(llmMachines);
     grid.appendChild(deployPanel);
 
+    const accessHintHtml = `
+        <div style="margin-bottom:12px; padding:12px 14px; background:var(--bg); border-radius:6px; border-left:3px solid var(--accent); font-family:var(--mono); font-size:11px; color:var(--text-mid); line-height:2">
+            <span style="color:var(--accent); font-family:var(--sans); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">How to access a running service</span><br>
+            ssh -f -N -L <span style="color:var(--accent)">&lt;local_port&gt;</span>:localhost:<span style="color:var(--accent)">&lt;remote_port&gt;</span> ${_currentUser?.stellar_account || '[stellar_account]'}@ferragon.stellar.research.liu.se<br>
+            curl http://localhost:<span style="color:var(--accent)">&lt;local_port&gt;</span>/v1/models
+        </div>`;
+
     // Per-machine running services
     const runningPanel = document.createElement('div');
     runningPanel.className = 'panel';
     runningPanel.innerHTML = `
         <div class="panel-header">
             <span class="panel-label">Running Services</span>
-        </div>
-        <div style="margin-bottom:12px; padding:12px 14px; background:var(--bg); border-radius:6px; border-left:3px solid var(--accent); font-family:var(--mono); font-size:11px; color:var(--text-mid); line-height:2">
-            <span style="color:var(--accent); font-family:var(--sans); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">How to access a running service</span><br>
-            ssh -f -N -L <span style="color:var(--accent)">&lt;local_port&gt;</span>:localhost:<span style="color:var(--accent)">&lt;remote_port&gt;</span> ${_currentUser?.stellar_account || '[stellar_account]'}@ferragon.stellar.research.liu.se<br>
-            curl http://localhost:<span style="color:var(--accent)">&lt;local_port&gt;</span>/v1/models
         </div>
         ${llmMachines.map(m => renderRunningSection(m)).join('')}
     `;
@@ -398,6 +400,7 @@ async function loadLLMTab() {
     tasksPanel.id = 'llm-tasks-panel';
     tasksPanel.innerHTML = `
         <div class="panel-header"><span class="panel-label">My Deploy Tasks</span></div>
+        ${accessHintHtml}
         <div id="llm-tasks-body"><div class="empty-state">No deploy tasks</div></div>
     `;
     grid.insertBefore(tasksPanel, deployPanel);
@@ -619,14 +622,21 @@ async function loadDeployTasks() {
             return;
         }
         body.innerHTML = `<table class="task-table">
-            <thead><tr><th>Model</th><th>Machine</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
+            <thead><tr><th>Model</th><th>Machine</th><th>Status</th><th>Ports</th><th>Submitted</th><th></th></tr></thead>
             <tbody>${tasks.map(t => {
                 const age = Math.round((Date.now()/1000 - t.submitted_at) / 60);
                 const canCancel = t.task_status === 'queued' || t.task_status === 'running';
+                const statusCell = t.container_status
+                    ? `<span style="font-family:var(--mono); font-size:11px; color:var(--green)">${escapeHtml(t.container_status)}</span>`
+                    : `<span class="task-status ${t.task_status}">${t.task_status}</span>`;
+                const portsCell = t.container_ports
+                    ? `<span style="font-family:var(--mono); font-size:11px; color:var(--text-mid)">${escapeHtml(t.container_ports)}</span>`
+                    : '—';
                 return `<tr>
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(t.model)}</td>
                     <td style="font-size:12px">${escapeHtml(displayName(t.machine))}</td>
-                    <td><span class="task-status ${t.task_status}">${t.task_status}</span></td>
+                    <td>${statusCell}</td>
+                    <td>${portsCell}</td>
                     <td style="font-size:12px; color:var(--text-dim)">${age}m ago</td>
                     <td>${canCancel ? `<button class="cancel-btn" onclick="cancelDeployTask('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}')">Cancel</button>` : ''}</td>
                 </tr>`;

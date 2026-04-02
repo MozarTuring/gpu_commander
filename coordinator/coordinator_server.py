@@ -568,17 +568,47 @@ class LLMDeployRequest(BaseModel):
 async def get_my_deploy_tasks(user: dict = Depends(require_auth)):
     username = user["username"]
     records = [r for r in _deploy_records if user["role"] == "admin" or r["username"] == username]
+
+    # Fetch running containers once per machine (only for machines that have completed tasks)
+    machines_needed = {r["machine"] for r in records}
+    running_by_machine: dict[str, list[dict]] = {}
+    for mname in machines_needed:
+        m = cfg.machines.get(mname)
+        if not m or not _machine_online.get(mname):
+            continue
+        try:
+            cmd = "docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || true"
+            res = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 10})
+            running_by_machine[mname] = []
+            for line in res.get("stdout", "").strip().splitlines():
+                parts = line.split("\t")
+                running_by_machine[mname].append({
+                    "name": parts[0] if len(parts) > 0 else "",
+                    "status": parts[1] if len(parts) > 1 else "",
+                    "ports": parts[2] if len(parts) > 2 else "",
+                })
+        except Exception:
+            pass
+
     result = []
     for r in records:
         m = cfg.machines.get(r["machine"])
-        status = "unknown"
+        task_status = "unknown"
         if m:
             try:
                 task = await _agent_request(m, "GET", f"/tasks/{r['task_id']}", timeout=5)
-                status = task.get("status", "unknown")
+                task_status = task.get("status", "unknown")
             except Exception:
                 pass
-        result.append({**r, "task_status": status})
+        entry = {**r, "task_status": task_status}
+        # For completed tasks, enrich with live Docker status and ports
+        if task_status == "completed" and r.get("container"):
+            containers = running_by_machine.get(r["machine"], [])
+            match = next((c for c in containers if c["name"] == r["container"]), None)
+            if match:
+                entry["container_status"] = match["status"]
+                entry["container_ports"] = match["ports"]
+        result.append(entry)
     return result
 
 
