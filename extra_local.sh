@@ -1,6 +1,6 @@
 # Extra local steps when deploying gpu_commander.
-# Sourced by meta_script.sh — has access to $1 (primary host), $run_dir_pre, $last_commit, $run_id, _git_branch, _remote_proj.
-# Called twice: with "pre" before rsync, and "after" after the remote job launches.
+# Sourced by meta_script.sh — $1=phase (pre|after), $2=primary host.
+# Also has access to $run_dir_pre, $last_commit, $run_id, _git_branch, _remote_proj.
 
 _vllm_branch=$(git -C vllm_service rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
 
@@ -25,12 +25,12 @@ fi
 # --- after ---
 
 # Sync vllm_service to branch-specific dir based on vllm_service's own branch name
-echo "Syncing vllm_service to $1 (vllm_service_${_vllm_branch})..."
+echo "Syncing vllm_service to $2 (vllm_service_${_vllm_branch})..."
 rsync -av --exclude-from='common_tools/rsync_exclude.txt' \
-    vllm_service/ "$1":${run_dir_pre}/vllm_service_${_vllm_branch}/
+    vllm_service/ "$2":${run_dir_pre}/vllm_service_${_vllm_branch}/
 
 # Deploy to peer machines and set up SSH tunnel — only when primary is ferragon to avoid recursion
-if [[ "$1" == "custodian2ferragon" ]]; then
+if [[ "$2" == "custodian2ferragon" ]]; then
     _coord_port=$(python3 -c "import yaml; cfg=yaml.safe_load(open('${_config_file}')); print(cfg['coordinator']['port'])")
 
     for _peer in $(python3 -c "import yaml; cfg=yaml.safe_load(open('${_config_file}')); [print(n) for n in cfg['machines'] if n != 'custodian2ferragon']"); do

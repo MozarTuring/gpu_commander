@@ -24,7 +24,7 @@ machines:
     ssh_alias: custodian2ferragon
     remote_dir: /home/custodian/project_remote_jwm/gpu_commander/agent
     description: "ferragon.stellar.research.liu.se"
-    vllm_service_dir: /home/custodian/project_remote_jwm/vllm_service
+    vllm_service_dir: /home/custodian/project_remote_jwm/vllm_service_main
 
   custodian2greatrawr:
     host: greatrawr.stellar.research.liu.se   # direct hostname from ferragon
@@ -32,4 +32,4 @@ machines:
     ssh_alias: custodian2greatrawr
     remote_dir: /home/custodian/project_remote_jwm/gpu_commander/agent
     description: "greatrawr.stellar.research.liu.se"
-    vllm_service_dir: /home/custodian/project_remote_jwm/vllm_service
+    vllm_service_dir: /home/custodian/project_remote_jwm/vllm_service_main
