@@ -135,7 +135,20 @@ _container_last_active: dict[str, float] = {}
 _idle_log: list[dict] = []  # recent auto-stop events
 
 # Deploy ownership: list of {task_id, machine, model, container, username, submitted_at}
-_deploy_records: list[dict] = []
+_DEPLOY_RECORDS_FILE = Path(__file__).resolve().parent.parent / "deploy_records.json"
+
+def _load_deploy_records() -> list[dict]:
+    if _DEPLOY_RECORDS_FILE.exists():
+        try:
+            return json.loads(_DEPLOY_RECORDS_FILE.read_text())
+        except Exception:
+            return []
+    return []
+
+def _save_deploy_records() -> None:
+    _DEPLOY_RECORDS_FILE.write_text(json.dumps(_deploy_records, indent=2))
+
+_deploy_records: list[dict] = _load_deploy_records()
 
 
 # ---------------------------------------------------------------------------
@@ -670,6 +683,7 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
         "username": user["username"],
         "submitted_at": time.time(),
     })
+    _save_deploy_records()
     return result
 
 
