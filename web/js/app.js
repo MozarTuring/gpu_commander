@@ -641,7 +641,9 @@ async function loadDeployTasks() {
                 const age = Math.round((Date.now()/1000 - t.submitted_at) / 60);
                 const canCancel = t.task_status === 'queued' || t.task_status === 'running';
                 const statusCell = t.container_status
-                    ? `<span style="font-family:var(--mono); font-size:11px; color:var(--green)">${escapeHtml(t.container_status)}</span>`
+                    ? t.container_status === 'not found'
+                        ? `<span style="font-family:var(--mono); font-size:11px; color:var(--red)">deploy failed</span>`
+                        : `<span style="font-family:var(--mono); font-size:11px; color:var(--green)">${escapeHtml(t.container_status)}</span>`
                     : `<span class="task-status ${t.task_status}">${t.task_status}</span>`;
                 const portsCell = t.container_ports
                     ? `<span style="font-family:var(--mono); font-size:11px; color:var(--text-mid)">${escapeHtml(t.container_ports)}</span>`

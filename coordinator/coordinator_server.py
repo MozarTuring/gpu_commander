@@ -669,6 +669,9 @@ async def get_my_deploy_tasks(user: dict = Depends(require_auth)):
             if match:
                 entry["container_status"] = match["status"]
                 entry["container_ports"] = match["ports"]
+            elif r["machine"] in running_by_machine:
+                # Machine was reachable but container not found — deploy failed or container was removed
+                entry["container_status"] = "not found"
         result.append(entry)
     return result
 
