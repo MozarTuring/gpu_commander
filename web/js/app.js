@@ -382,12 +382,12 @@ async function loadLLMTab() {
         <div class="panel-header">
             <span class="panel-label">Running Services</span>
         </div>
-        ${llmMachines.map(m => renderRunningSection(m)).join('')}
-        <div style="margin-top:12px; padding:10px 12px; background:var(--bg); border-radius:6px; font-family:var(--mono); font-size:11px; color:var(--text-dim); line-height:1.9">
+        <div style="margin-bottom:12px; padding:10px 12px; background:var(--bg); border-radius:6px; font-family:var(--mono); font-size:11px; color:var(--text-dim); line-height:1.9">
             <span style="color:var(--text-mid)">To access a running service, forward its port then query it:</span><br>
             ssh -f -N -L &lt;port&gt;:localhost:&lt;port&gt; ${_currentUser?.stellar_account || '[stellar_account]'}@ferragon.stellar.research.liu.se<br>
             curl http://localhost:&lt;port&gt;/v1/models
         </div>
+        ${llmMachines.map(m => renderRunningSection(m)).join('')}
     `;
     grid.appendChild(runningPanel);
 
