@@ -638,7 +638,7 @@ async def get_my_deploy_tasks(user: dict = Depends(require_auth)):
         if not m or not _machine_online.get(mname):
             continue
         try:
-            cmd = "docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || true"
+            cmd = "docker ps -a --format '{{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || true"
             res = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 10})
             running_by_machine[mname] = []
             for line in res.get("stdout", "").strip().splitlines():
