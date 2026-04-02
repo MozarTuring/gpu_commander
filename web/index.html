@@ -192,11 +192,19 @@
             <div class="modal-header">
                 <span class="panel-label">Complete Your Profile</span>
             </div>
-            <p class="settings-desc" style="margin-bottom:20px">Before using GPU Commander, set up your profile. These are required to access deployed models.</p>
-            <div class="form-group">
+            <p class="settings-desc" style="margin-bottom:20px">Before using GPU Commander, complete your profile.</p>
+            <div class="form-group" id="setup-stellar-group">
                 <label class="form-label">Stellar Account Username</label>
                 <input type="text" id="setup-stellar" class="form-input" placeholder="your_username">
                 <div style="font-size:11px; color:var(--text-dim); margin-top:5px">Used to build SSH tunnel commands for accessing models.</div>
+            </div>
+            <div class="form-group" id="setup-password-group">
+                <label class="form-label">New Password <span style="color:var(--accent); font-size:10px">REQUIRED</span></label>
+                <input type="password" id="setup-new-password" class="form-input" placeholder="Choose a password">
+            </div>
+            <div class="form-group" id="setup-password-confirm-group">
+                <label class="form-label">Confirm Password</label>
+                <input type="password" id="setup-confirm-password" class="form-input" placeholder="Repeat password">
             </div>
             <div class="form-group">
                 <label class="form-label">HuggingFace Token <span style="color:var(--text-dim); font-weight:400; text-transform:none; letter-spacing:0">(optional — needed to deploy gated models)</span></label>

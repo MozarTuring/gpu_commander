@@ -867,20 +867,40 @@ function showSetupModal() {
     document.getElementById('setup-modal').style.display = 'flex';
     if (_currentUser?.stellar_account)
         document.getElementById('setup-stellar').value = _currentUser.stellar_account;
+    // Hide stellar field if already set, show only password change
+    const needsStellar = !_currentUser?.stellar_account;
+    const needsPassword = _currentUser?.must_change_password;
+    document.getElementById('setup-stellar-group').style.display = needsStellar ? '' : 'none';
+    document.getElementById('setup-password-group').style.display = needsPassword ? '' : 'none';
+    document.getElementById('setup-password-confirm-group').style.display = needsPassword ? '' : 'none';
 }
 
 async function saveProfile() {
     const stellar = document.getElementById('setup-stellar').value.trim();
+    const newPw = document.getElementById('setup-new-password').value;
+    const confirmPw = document.getElementById('setup-confirm-password').value;
     const hfToken = document.getElementById('setup-hf-token')?.value.trim() || '';
     const errEl = document.getElementById('setup-error');
     errEl.textContent = '';
-    if (!stellar) { errEl.textContent = 'Stellar account is required.'; return; }
+
+    const needsStellar = !_currentUser?.stellar_account;
+    const needsPassword = _currentUser?.must_change_password;
+
+    if (needsStellar && !stellar) { errEl.textContent = 'Stellar account is required.'; return; }
+    if (needsPassword) {
+        if (!newPw) { errEl.textContent = 'Password is required.'; return; }
+        if (newPw !== confirmPw) { errEl.textContent = 'Passwords do not match.'; return; }
+        if (newPw.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+    }
     try {
-        const body = { stellar_account: stellar };
+        const body = {};
+        if (needsStellar && stellar) body.stellar_account = stellar;
+        if (needsPassword && newPw) body.new_password = newPw;
         if (hfToken) body.hf_token = hfToken;
         await api('/api/auth/profile', { method: 'POST', body: JSON.stringify(body) });
-        _currentUser.stellar_account = stellar;
+        if (stellar) _currentUser.stellar_account = stellar;
         _currentUser.setup_required = false;
+        _currentUser.must_change_password = false;
         document.getElementById('setup-modal').style.display = 'none';
         startPolling();
     } catch (e) {

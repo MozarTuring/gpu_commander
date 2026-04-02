@@ -111,6 +111,7 @@ def _bootstrap_admin() -> None:
             "password_hash": _hash_password(password, salt),
             "salt": salt,
             "role": "admin",
+            "must_change_password": True,
         }
         _save_users(users)
         print(f"\n{'='*52}")
@@ -272,13 +273,15 @@ async def me(user: dict = Depends(require_auth)):
         "role": user["role"],
         "stellar_account": stellar,
         "hf_token_set": bool(hf),
-        "setup_required": not stellar,
+        "setup_required": not stellar or u.get("must_change_password", False),
+        "must_change_password": u.get("must_change_password", False),
     }
 
 
 class UserProfileRequest(BaseModel):
     stellar_account: Optional[str] = None
     hf_token: Optional[str] = None
+    new_password: Optional[str] = None
 
 @app.post("/api/auth/profile")
 async def update_profile(req: UserProfileRequest, user: dict = Depends(require_auth)):
@@ -288,11 +291,16 @@ async def update_profile(req: UserProfileRequest, user: dict = Depends(require_a
         users[username]["stellar_account"] = req.stellar_account.strip()
     if req.hf_token is not None:
         users[username]["hf_token"] = req.hf_token.strip()
+    if req.new_password:
+        salt = _secrets.token_hex(16)
+        users[username]["password_hash"] = _hash_password(req.new_password, salt)
+        users[username]["salt"] = salt
+        users[username]["must_change_password"] = False
     _save_users(users)
-    # Refresh session data
     stellar = users[username].get("stellar_account", "")
     hf = users[username].get("hf_token", "")
-    return {"ok": True, "stellar_account": stellar, "hf_token_set": bool(hf), "setup_required": not stellar}
+    return {"ok": True, "stellar_account": stellar, "hf_token_set": bool(hf),
+            "setup_required": not stellar or users[username].get("must_change_password", False)}
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +331,7 @@ async def create_user(req: CreateUserRequest, _: dict = Depends(require_admin)):
         "password_hash": _hash_password(req.password, salt),
         "salt": salt,
         "role": req.role,
+        "must_change_password": True,
     }
     _save_users(users)
     return {"username": req.username, "role": req.role}
