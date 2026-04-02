@@ -789,11 +789,14 @@ async def _check_idle_containers():
         if not m.vllm_service_dir or not _machine_online.get(machine_name):
             continue
 
-        # List only vllm containers (image vllm-rtx5090:latest)
-        list_cmd = "docker ps --filter 'ancestor=vllm-rtx5090:latest' --format '{{.Names}}' 2>/dev/null || true"
+        known = {r["container"] for r in _deploy_records if r["machine"] == machine_name}
+        if not known:
+            continue
+        list_cmd = "docker ps --format '{{.Names}}' 2>/dev/null || true"
         try:
             res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
-            containers = [l.strip() for l in res.get("stdout", "").splitlines() if l.strip()]
+            running = {l.strip() for l in res.get("stdout", "").splitlines() if l.strip()}
+            containers = known & running
         except Exception:
             continue
 
@@ -831,10 +834,14 @@ async def _update_last_active():
     for machine_name, m in cfg.machines.items():
         if not m.vllm_service_dir or not _machine_online.get(machine_name):
             continue
-        list_cmd = "docker ps --filter 'ancestor=vllm-rtx5090:latest' --format '{{.Names}}' 2>/dev/null || true"
+        known = {r["container"] for r in _deploy_records if r["machine"] == machine_name}
+        if not known:
+            continue
+        list_cmd = "docker ps --format '{{.Names}}' 2>/dev/null || true"
         try:
             res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
-            containers = [l.strip() for l in res.get("stdout", "").splitlines() if l.strip()]
+            running = {l.strip() for l in res.get("stdout", "").splitlines() if l.strip()}
+            containers = known & running
         except Exception:
             continue
         for container in containers:
