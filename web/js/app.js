@@ -599,12 +599,11 @@ async function deployLLM() {
 
     try {
         const body = { model };
-        if (_bestGpu !== null) body.which_gpu = _bestGpu;
         const task = await api(`/api/machines/${_bestMachine}/llm/deploy`, {
             method: 'POST',
             body: JSON.stringify(body),
         });
-        const gpuInfo = body.which_gpu !== undefined ? ` GPU${body.which_gpu}` : '';
+        const gpuInfo = '';
         const queued = task.status === 'queued';
         const queueMsg = queued
             ? `\n\n⏳ No GPU memory available right now. Task is queued and will deploy automatically once memory frees up (checks every 60s). You can cancel it below in "My Deploy Tasks".`

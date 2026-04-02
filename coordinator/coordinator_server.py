@@ -538,30 +538,31 @@ def _read_llm_models(vllm_dir: str) -> list[dict]:
     """Read model configs directly from local vllm_service_dir .env files."""
     import os as _os
     models = []
-    try:
-        for f in sorted(_os.listdir(vllm_dir)):
-            if not f.endswith('.env'):
-                continue
-            name = f[:-4]
-            if not name:
-                continue
-            env: dict[str, str] = {}
+    for f in sorted(_os.listdir(vllm_dir)):
+        if not f.endswith('.env'):
+            continue
+        name = f[:-4]
+        if not name:
+            continue
+        env: dict[str, str] = {}
+        try:
             with open(_os.path.join(vllm_dir, f)) as fp:
                 for line in fp:
                     line = line.strip()
                     if line and not line.startswith('#') and '=' in line:
                         k, v = line.split('=', 1)
                         env[k.strip()] = v.strip()
-            models.append({
-                'name': name,
-                'model': env.get('VLLM_MODEL', ''),
-                'port': env.get('VLLM_PORT', '8000'),
-                'served_name': env.get('VLLM_SERVED_MODEL_NAME', name),
-                'which_gpu': int(env.get('VLLM_WHICH_GPU', '0')),
-                'memory_utilization': float(env.get('VLLM_GPU_MEMORY_UTILIZATION', '0.85')),
-            })
-    except Exception:
-        pass
+        except Exception:
+            continue
+        if 'VLLM_WHICH_GPU' in env:
+            raise ValueError(f"{f}: VLLM_WHICH_GPU must not be set in env files — GPU is selected automatically at deploy time")
+        models.append({
+            'name': name,
+            'model': env.get('VLLM_MODEL', ''),
+            'port': env.get('VLLM_PORT', '8000'),
+            'served_name': env.get('VLLM_SERVED_MODEL_NAME', name),
+            'memory_utilization': float(env.get('VLLM_GPU_MEMORY_UTILIZATION', '0.85')),
+        })
     return models
 
 
@@ -622,7 +623,6 @@ async def stop_llm_container(name: str, req: LLMStopRequest, user: dict = Depend
 
 class LLMDeployRequest(BaseModel):
     model: str           # env file stem, e.g. "qwen3dot5-35b-a3b"
-    which_gpu: Optional[int] = None  # override VLLM_WHICH_GPU if provided
 
 
 @app.get("/api/llm/my-tasks")
@@ -691,8 +691,14 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
         all_models = _read_llm_models(vd)
         model_cfg = next((x for x in all_models if x["name"] == req.model), None)
 
-        which_gpu = req.which_gpu if req.which_gpu is not None else (model_cfg.get("which_gpu", 0) if model_cfg else 0)
         required_mib = None
+        gpu_status = _gpu_cache.get(name)
+        gpus = gpu_status.get("gpus", []) if gpu_status else []
+        if gpus:
+            # Always auto-select: pick the GPU with the most free memory
+            which_gpu = max(range(len(gpus)), key=lambda i: gpus[i]["memory_free_mib"])
+        else:
+            which_gpu = 0
         if model_cfg:
             gpu_status = _gpu_cache.get(name)
             if gpu_status:
@@ -710,10 +716,12 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
                 detail="No HuggingFace token configured. Set your HF token in your profile before deploying.",
             )
 
-        sed_exprs = f's/^export VLLM_SERVED_MODEL_NAME=.*/export VLLM_SERVED_MODEL_NAME="{req.model}"/'
-        sed_exprs += f'; s|docker compose -p|export VLLM_WHICH_GPU={which_gpu}\\n    docker compose -p|'
-        sed_exprs += f'; s/^export HUGGING_FACE_HUB_TOKEN=.*/export HUGGING_FACE_HUB_TOKEN="{effective_hf}"/'
-        sed_exprs += f'; s/^export HF_TOKEN=.*/export HF_TOKEN="{effective_hf}"/'
+        exports = (
+            f'export VLLM_SERVED_MODEL_NAME="{req.model}" && '
+            f'export VLLM_WHICH_GPU={which_gpu} && '
+            f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
+            f'export HF_TOKEN="{effective_hf}"'
+        )
 
         # Prepend a memory-wait loop so the task queues until GPU is free
         if required_mib is not None:
@@ -729,7 +737,7 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             )
         else:
             wait_loop = ""
-        cmd = f"{wait_loop}cd {vd} && sed '{sed_exprs}' remote.sh | bash"
+        cmd = f"{wait_loop}{exports} && cd {vd} && bash remote.sh"
         result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
         container_name = f"{req.model}-vllm-1"
         _deploy_records.append({
