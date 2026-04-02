@@ -10,7 +10,17 @@
 PROJ_DIR="${RUN_DIR_PRE}/${RUN_PROJ}"
 AGENT_DIR="${PROJ_DIR}/agent"
 VENV_DIR="${PROJ_DIR}/.venv"
-CONFIG_FILE="${PROJ_DIR}/config.yaml"
+
+# Pick config based on branch suffix: gpu_commander_main -> config.yaml, gpu_commander_dev -> config.dev.yaml
+_branch_suffix="${RUN_PROJ##*_}"  # everything after last underscore
+if [[ "$_branch_suffix" == "main" ]]; then
+    CONFIG_FILE="${PROJ_DIR}/config.yaml"
+elif [[ -f "${PROJ_DIR}/config.${_branch_suffix}.yaml" ]]; then
+    CONFIG_FILE="${PROJ_DIR}/config.${_branch_suffix}.yaml"
+else
+    CONFIG_FILE="${PROJ_DIR}/config.yaml"
+fi
+echo "Using config: ${CONFIG_FILE}"
 
 # Create/reuse venv and install deps
 if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
