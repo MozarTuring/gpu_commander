@@ -723,8 +723,12 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             f'export HF_TOKEN="{effective_hf}"'
         )
 
-        # Prepend a memory-wait loop so the task queues until GPU is free
-        if required_mib is not None:
+        # Check if GPU memory is currently sufficient
+        free_mib = gpus[which_gpu]["memory_free_mib"] if which_gpu < len(gpus) else None
+        memory_insufficient = required_mib is not None and free_mib is not None and free_mib < required_mib
+
+        # Prepend a memory-wait loop only when GPU is currently too full
+        if memory_insufficient:
             wait_loop = (
                 f'echo "Waiting for GPU {which_gpu} to have {required_mib} MiB free..."; '
                 f'while true; do '
@@ -739,6 +743,7 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             wait_loop = ""
         cmd = f"{wait_loop}{exports} && cd {vd} && bash remote.sh"
         result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
+        result["memory_insufficient"] = memory_insufficient
         container_name = f"{req.model}-vllm-1"
         _deploy_records.append({
             "task_id": result["id"],

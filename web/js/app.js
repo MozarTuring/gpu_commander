@@ -604,9 +604,8 @@ async function deployLLM() {
             body: JSON.stringify(body),
         });
         const gpuInfo = '';
-        const queued = task.status === 'queued';
-        const queueMsg = queued
-            ? `\n\n⏳ No GPU memory available right now. Task is queued and will deploy automatically once memory frees up (checks every 60s). You can cancel it below in "My Deploy Tasks".`
+        const queueMsg = task.memory_insufficient
+            ? `\n\n⏳ GPU memory is full. Task will deploy automatically once memory frees up (checks every 60s). You can cancel it below in "My Deploy Tasks".`
             : `\n\nDeploy started. Track progress below in "My Deploy Tasks".`;
         output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${displayName(_bestMachine)}${gpuInfo}\nModel: ${model}${queueMsg}`;
         loadDeployTasks();
