@@ -57,6 +57,8 @@ print(cfg.get('auth', {}).get('token', 'gpu-commander-secret-change-me'))
 echo "Agent dir:  ${AGENT_DIR}"
 echo "Agent port: ${AGENT_PORT}"
 
+# Kill coordinator first so it can't submit stale tasks to the new agent
+pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || true
 # Kill old agent
 pkill -f 'uvicorn.*agent_server' 2>/dev/null || true
 sleep 1
@@ -101,8 +103,6 @@ print(cfg.get('coordinator', {}).get('port', 9800))
 " 2>/dev/null || echo 9800)
 
 echo "Coordinator port: ${COORDINATOR_PORT}"
-pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || true
-sleep 1
 
 cd "${PROJ_DIR}/coordinator"
 GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
