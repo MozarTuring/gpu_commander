@@ -31,6 +31,7 @@ class CoordinatorConfig:
 class LLMIdleConfig:
     timeout_hours: float = 2.0
     check_interval_hours: float = 0.5
+    last_active_interval: int = 30  # seconds between last-active updates for display
 
 
 @dataclass
@@ -75,6 +76,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
     llm_idle = LLMIdleConfig(
         timeout_hours=idle_raw.get("timeout_hours", 2.0),
         check_interval_hours=idle_raw.get("check_interval_hours", 0.5),
+        last_active_interval=idle_raw.get("last_active_interval", 30),
     )
 
     return AppConfig(coordinator=coordinator, auth_token=auth_token, machines=machines, llm_idle=llm_idle)

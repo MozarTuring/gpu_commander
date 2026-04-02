@@ -798,6 +798,37 @@ async def _check_idle_containers():
                     print(f"[idle-stop] failed to stop {machine_name}:{container}: {e}")
 
 
+async def _update_last_active():
+    """Fast loop: update _container_last_active for display without stopping containers."""
+    now = time.time()
+    check_minutes = max(1, cfg.llm_idle.last_active_interval // 60 + 1)
+    for machine_name, m in cfg.machines.items():
+        if not m.vllm_service_dir or not _machine_online.get(machine_name):
+            continue
+        list_cmd = "docker ps --filter 'ancestor=vllm-rtx5090:latest' --format '{{.Names}}' 2>/dev/null || true"
+        try:
+            res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
+            containers = [l.strip() for l in res.get("stdout", "").splitlines() if l.strip()]
+        except Exception:
+            continue
+        for container in containers:
+            key = f"{machine_name}:{container}"
+            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -c 'Finished request' || echo 0"
+            try:
+                res = await _agent_request(m, "POST", "/execute", json_body={"command": activity_cmd, "timeout": 10})
+                count = int(res.get("stdout", "0").strip())
+            except Exception:
+                count = 0
+            if count > 0 or key not in _container_last_active:
+                _container_last_active[key] = now
+
+
+async def _last_active_loop():
+    while True:
+        await asyncio.sleep(cfg.llm_idle.last_active_interval)
+        await _update_last_active()
+
+
 async def _idle_checker_loop():
     check_interval_s = cfg.llm_idle.check_interval_hours * 3600
     while True:
@@ -825,6 +856,7 @@ async def _poll_gpu_status():
 async def startup():
     asyncio.create_task(_poll_gpu_status())
     asyncio.create_task(_idle_checker_loop())
+    asyncio.create_task(_last_active_loop())
 
 
 # ---------------------------------------------------------------------------
