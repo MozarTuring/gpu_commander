@@ -14,10 +14,17 @@ if [[ "$1" == "custodian2ferragon" ]]; then
 
     echo "Setting up SSH tunnel to coordinator (port 9800)..."
     pkill -f "ssh.*-L 9800:localhost:9800.*custodian2ferragon" 2>/dev/null || true
+    # Kill any local process holding port 9800 (e.g. stale local coordinator)
+    lsof -ti :9800 2>/dev/null | xargs kill 2>/dev/null || true
     sleep 1
     ssh -f -N -L 9800:localhost:9800 \
         -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-        -o ExitOnForwardFailure=yes custodian2ferragon \
-        && echo "Tunnel ready: http://localhost:9800" \
-        || echo "WARNING: SSH tunnel setup failed"
+        -o ExitOnForwardFailure=yes custodian2ferragon
+    sleep 1
+    if curl -sf http://localhost:9800/api/machines >/dev/null 2>&1 || \
+       curl -s http://localhost:9800/api/machines 2>/dev/null | grep -q 'Not authenticated'; then
+        echo "Tunnel ready: http://localhost:9800"
+    else
+        echo "WARNING: SSH tunnel setup failed — nothing responding on port 9800"
+    fi
 fi

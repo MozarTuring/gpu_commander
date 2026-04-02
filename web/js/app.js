@@ -381,9 +381,13 @@ async function loadLLMTab() {
     runningPanel.innerHTML = `
         <div class="panel-header">
             <span class="panel-label">Running Services</span>
-            <button class="login-btn" style="padding:6px 16px; font-size:11px; width:auto; margin:0" onclick="showAccessModal()">Access a Model</button>
         </div>
         ${llmMachines.map(m => renderRunningSection(m)).join('')}
+        <div style="margin-top:12px; padding:10px 12px; background:var(--bg); border-radius:6px; font-family:var(--mono); font-size:11px; color:var(--text-dim); line-height:1.9">
+            <span style="color:var(--text-mid)">To access a running service, forward its port then query it:</span><br>
+            ssh -f -N -L &lt;port&gt;:localhost:&lt;port&gt; ${_currentUser?.stellar_account || '[stellar_account]'}@ferragon.stellar.research.liu.se<br>
+            curl http://localhost:&lt;port&gt;/v1/models
+        </div>
     `;
     grid.appendChild(runningPanel);
 
@@ -536,16 +540,6 @@ function renderRunningSection(m) {
                 const stopBtn = isOwner || _currentUser?.role === 'admin'
                     ? `<button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button>`
                     : '';
-                const hostPort = (c.ports.match(/:(\d+)->/) || [])[1] || '';
-                const sshHost = `${_currentUser?.stellar_account || '[stellar_account]'}@${m.description || m.host}`;
-                const accessHint = hostPort ? `<tr>
-                    <td colspan="6" style="padding:0 12px 10px; border-bottom:1px solid var(--border)">
-                        <div style="font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--bg); border-radius:6px; padding:8px 12px; line-height:1.8">
-                            <span style="color:var(--text-mid)">Forward port:</span> ssh -f -N -L ${hostPort}:localhost:${hostPort} ${sshHost}<br>
-                            <span style="color:var(--text-mid)">Test:</span> curl http://localhost:${hostPort}/v1/models
-                        </div>
-                    </td>
-                </tr>` : '';
                 return `<tr>
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
                     <td style="font-size:12px; color:var(--text-dim)">${escapeHtml(c.owner || '—')}</td>
@@ -553,7 +547,7 @@ function renderRunningSection(m) {
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.ports)}</td>
                     <td>${idleHtml}</td>
                     <td>${stopBtn}</td>
-                </tr>${accessHint}`;
+                </tr>`;
             }).join('')}
            </tbody></table>`;
     return `<div style="margin-bottom:12px">
