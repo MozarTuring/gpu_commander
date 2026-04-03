@@ -538,8 +538,8 @@ def _read_llm_models(vllm_dir: str) -> list[dict]:
     """Read model configs from per-model subdirectories containing docker-compose.yml."""
     import os as _os, re as _re, yaml as _yaml
     models = []
-    for name in sorted(_os.listdir(vllm_dir)):
-        compose_path = _os.path.join(vllm_dir, name, "docker-compose.yml")
+    for dir_name in sorted(_os.listdir(vllm_dir)):
+        compose_path = _os.path.join(vllm_dir, dir_name, "docker-compose.yml")
         if not _os.path.isfile(compose_path):
             continue
         try:
@@ -548,54 +548,64 @@ def _read_llm_models(vllm_dir: str) -> list[dict]:
             services = compose.get("services") or {}
             if not services:
                 continue
-            svc = next(iter(services.values()))
-            # Parse environment list into dict (skip runtime ${VAR} references)
-            env: dict[str, str] = {}
-            for e in svc.get("environment", []):
-                if isinstance(e, str) and "=" in e and not e.startswith("${"):
-                    k, v = e.split("=", 1)
-                    if not v.startswith("${"):
-                        env[k.strip()] = v.strip()
-            # Extract host port (handle ${VAR:-default} syntax)
-            host_port = "8000"
-            for p in svc.get("ports", []):
-                ps = str(p).split(":")[0]
-                m = _re.search(r':-(\d+)', ps)
-                if m:
-                    host_port = m.group(1)
-                elif _re.match(r'^\d+$', ps):
-                    host_port = ps
-                break
-            # Detect type from command or environment
-            cmd = str(svc.get("command", ""))
-            is_whisper = "WHISPER_MODEL" in " ".join(
-                e for e in svc.get("environment", []) if isinstance(e, str)
-            )
-            if is_whisper:
-                models.append({
-                    "name": svc.get("container_name", name),
-                    "model": env.get("WHISPER_MODEL", name),
-                    "port": host_port,
-                    "served_name": svc.get("container_name", name),
-                    "memory_utilization": None,
-                    "type": "whisper",
-                    "language": env.get("WHISPER_LANGUAGE", "auto"),
-                })
-            else:
-                mem_util_m = _re.search(r'--gpu-memory-utilization\s+([\d.]+)', cmd)
-                mem_util = float(mem_util_m.group(1)) if mem_util_m else 0.85
-                model_m = _re.search(r'vllm serve\s+(\S+)', cmd)
-                hf_model = model_m.group(1) if model_m else ""
-                container_name = svc.get("container_name", f"{name}-vllm-1")
-                models.append({
-                    "name": name,
-                    "model": hf_model,
-                    "port": host_port,
-                    "served_name": container_name.replace("-vllm-1", ""),
-                    "memory_utilization": mem_util,
-                    "type": "vllm",
-                    "container_name": container_name,
-                })
+            multi = len(services) > 1
+            for svc_name, svc in services.items():
+                # Parse environment list into dict (skip runtime ${VAR} references)
+                env: dict[str, str] = {}
+                for e in svc.get("environment", []):
+                    if isinstance(e, str) and "=" in e and not e.startswith("${"):
+                        k, v = e.split("=", 1)
+                        if not v.startswith("${"):
+                            env[k.strip()] = v.strip()
+                # Extract host port (handle ${VAR:-default} syntax)
+                host_port = "8000"
+                for p in svc.get("ports", []):
+                    ps = str(p).split(":")[0]
+                    m = _re.search(r':-(\d+)', ps)
+                    if m:
+                        host_port = m.group(1)
+                    elif _re.match(r'^\d+$', ps):
+                        host_port = ps
+                    break
+                container_name = svc.get("container_name", svc_name)
+                # For multi-service compose (e.g. whisper), model name = container name
+                # For single-service compose (vllm), model name = directory name
+                model_name = container_name if multi else dir_name
+                compose_service = svc_name if multi else ""
+
+                is_whisper = "WHISPER_MODEL" in " ".join(
+                    e for e in svc.get("environment", []) if isinstance(e, str)
+                )
+                if is_whisper:
+                    models.append({
+                        "name": model_name,
+                        "model": env.get("WHISPER_MODEL", svc_name),
+                        "port": host_port,
+                        "served_name": container_name,
+                        "memory_utilization": None,
+                        "type": "whisper",
+                        "language": env.get("WHISPER_LANGUAGE", "auto"),
+                        "container_name": container_name,
+                        "compose_dir": dir_name,
+                        "compose_service": compose_service,
+                    })
+                else:
+                    cmd = str(svc.get("command", ""))
+                    mem_util_m = _re.search(r'--gpu-memory-utilization\s+([\d.]+)', cmd)
+                    mem_util = float(mem_util_m.group(1)) if mem_util_m else 0.85
+                    model_m = _re.search(r'vllm serve\s+(\S+)', cmd)
+                    hf_model = model_m.group(1) if model_m else ""
+                    models.append({
+                        "name": model_name,
+                        "model": hf_model,
+                        "port": host_port,
+                        "served_name": container_name.replace("-vllm-1", ""),
+                        "memory_utilization": mem_util,
+                        "type": "vllm",
+                        "container_name": container_name,
+                        "compose_dir": dir_name,
+                        "compose_service": compose_service,
+                    })
         except Exception:
             continue
     return models
@@ -788,8 +798,11 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             else:
                 wait_loop = ""
 
+        compose_dir = model_cfg.get("compose_dir", req.model) if model_cfg else req.model
+        compose_service = model_cfg.get("compose_service", "") if model_cfg else ""
         exports = (
-            f'export VLLM_SERVED_MODEL_NAME="{req.model}" && '
+            f'export VLLM_SERVED_MODEL_NAME="{compose_dir}" && '
+            f'export COMPOSE_SERVICE="{compose_service}" && '
             f'export VLLM_WHICH_GPU={which_gpu} && '
             f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
             f'export HF_TOKEN="{effective_hf}"'
