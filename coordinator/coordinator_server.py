@@ -745,9 +745,28 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             memory_insufficient = False
             wait_loop = ""
         else:
-            # vLLM: auto-select GPU with most free memory
+            # Find GPUs reserved by currently-starting containers on this machine
+            reserved_gpus: set[int] = set()
+            try:
+                list_cmd = "docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true"
+                res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
+                for line in res.get("stdout", "").splitlines():
+                    parts = line.strip().split("\t", 1)
+                    if len(parts) < 2:
+                        continue
+                    cname, cstatus = parts[0].strip(), parts[1].strip()
+                    if "health: starting" in cstatus:
+                        rec = next((r for r in _deploy_records if r["machine"] == name and r["container"] == cname), None)
+                        if rec and "which_gpu" in rec:
+                            reserved_gpus.add(int(rec["which_gpu"]))
+            except Exception:
+                pass
+
+            # vLLM: auto-select GPU with most free memory, excluding reserved GPUs
             if gpus:
-                which_gpu = max(range(len(gpus)), key=lambda i: gpus[i]["memory_free_mib"])
+                available = [i for i in range(len(gpus)) if i not in reserved_gpus]
+                pool = available if available else list(range(len(gpus)))
+                which_gpu = max(pool, key=lambda i: gpus[i]["memory_free_mib"])
             else:
                 which_gpu = 0
             required_mib = None
@@ -786,6 +805,7 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             "container": container_name,
             "username": user["username"],
             "submitted_at": time.time(),
+            "which_gpu": which_gpu,
         })
         _save_deploy_records()
         return result
@@ -912,6 +932,15 @@ async def _update_last_active():
                 count = 0
             if container in not_yet_healthy:
                 _container_last_active.pop(key, None)
+                # Stop crash-looping containers that failed due to insufficient GPU memory
+                oom_cmd = f"docker logs --tail 30 {container} 2>&1 | grep -c 'is less than desired GPU memory utilization' || echo 0"
+                try:
+                    oom_res = await _agent_request(m, "POST", "/execute", json_body={"command": oom_cmd, "timeout": 10})
+                    if int(oom_res.get("stdout", "0").strip()) > 0:
+                        await _agent_request(m, "POST", "/execute", json_body={"command": f"docker rm -f {container}", "timeout": 30})
+                        print(f"[oom-stop] {machine_name}:{container} removed — insufficient GPU memory")
+                except Exception:
+                    pass
                 continue
             if key not in _container_last_active or count > 0:
                 _container_last_active[key] = now
