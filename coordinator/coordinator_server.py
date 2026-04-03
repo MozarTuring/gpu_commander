@@ -855,11 +855,11 @@ async def _check_idle_containers():
             except Exception:
                 count = 0
 
-            if key not in _container_last_active:
-                # Don't start tracking until the container is healthy
-                if container not in not_yet_healthy:
-                    _container_last_active[key] = now
-            elif count > 0:
+            if container in not_yet_healthy:
+                # Container is starting/restarting — reset timer so it starts fresh when healthy
+                _container_last_active.pop(key, None)
+                continue
+            if key not in _container_last_active or count > 0:
                 _container_last_active[key] = now
 
             idle_s = now - _container_last_active[key]
@@ -910,10 +910,10 @@ async def _update_last_active():
                 count = int(res.get("stdout", "0").strip())
             except Exception:
                 count = 0
-            if key not in _container_last_active:
-                if container not in not_yet_healthy:
-                    _container_last_active[key] = now
-            elif count > 0:
+            if container in not_yet_healthy:
+                _container_last_active.pop(key, None)
+                continue
+            if key not in _container_last_active or count > 0:
                 _container_last_active[key] = now
 
 
