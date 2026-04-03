@@ -792,10 +792,20 @@ async def _check_idle_containers():
         known = {r["container"] for r in _deploy_records if r["machine"] == machine_name}
         if not known:
             continue
-        list_cmd = "docker ps --format '{{.Names}}' 2>/dev/null || true"
+        list_cmd = "docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true"
         try:
             res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
-            running = {l.strip() for l in res.get("stdout", "").splitlines() if l.strip()}
+            running = set()
+            not_yet_healthy = set()
+            for line in res.get("stdout", "").splitlines():
+                parts = line.strip().split("\t", 1)
+                if not parts or not parts[0].strip():
+                    continue
+                cname = parts[0].strip()
+                status = parts[1].strip() if len(parts) > 1 else ""
+                running.add(cname)
+                if "health: starting" in status or "health: unhealthy" in status:
+                    not_yet_healthy.add(cname)
             containers = known & running
         except Exception:
             continue
@@ -811,7 +821,11 @@ async def _check_idle_containers():
             except Exception:
                 count = 0
 
-            if count > 0 or key not in _container_last_active:
+            if key not in _container_last_active:
+                # Don't start tracking until the container is healthy
+                if container not in not_yet_healthy:
+                    _container_last_active[key] = now
+            elif count > 0:
                 _container_last_active[key] = now
 
             idle_s = now - _container_last_active[key]
@@ -837,10 +851,20 @@ async def _update_last_active():
         known = {r["container"] for r in _deploy_records if r["machine"] == machine_name}
         if not known:
             continue
-        list_cmd = "docker ps --format '{{.Names}}' 2>/dev/null || true"
+        list_cmd = "docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true"
         try:
             res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
-            running = {l.strip() for l in res.get("stdout", "").splitlines() if l.strip()}
+            running = set()
+            not_yet_healthy = set()
+            for line in res.get("stdout", "").splitlines():
+                parts = line.strip().split("\t", 1)
+                if not parts or not parts[0].strip():
+                    continue
+                cname = parts[0].strip()
+                status = parts[1].strip() if len(parts) > 1 else ""
+                running.add(cname)
+                if "health: starting" in status or "health: unhealthy" in status:
+                    not_yet_healthy.add(cname)
             containers = known & running
         except Exception:
             continue
@@ -852,7 +876,10 @@ async def _update_last_active():
                 count = int(res.get("stdout", "0").strip())
             except Exception:
                 count = 0
-            if count > 0 or key not in _container_last_active:
+            if key not in _container_last_active:
+                if container not in not_yet_healthy:
+                    _container_last_active[key] = now
+            elif count > 0:
                 _container_last_active[key] = now
 
 
