@@ -535,34 +535,69 @@ async def delete_hf_token():
 # ---------------------------------------------------------------------------
 
 def _read_llm_models(vllm_dir: str) -> list[dict]:
-    """Read model configs directly from local vllm_service_dir .env files."""
-    import os as _os
+    """Read model configs from per-model subdirectories containing docker-compose.yml."""
+    import os as _os, re as _re, yaml as _yaml
     models = []
-    for f in sorted(_os.listdir(vllm_dir)):
-        if not f.endswith('.env'):
+    for name in sorted(_os.listdir(vllm_dir)):
+        compose_path = _os.path.join(vllm_dir, name, "docker-compose.yml")
+        if not _os.path.isfile(compose_path):
             continue
-        name = f[:-4]
-        if not name:
-            continue
-        env: dict[str, str] = {}
         try:
-            with open(_os.path.join(vllm_dir, f)) as fp:
-                for line in fp:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        k, v = line.split('=', 1)
+            with open(compose_path) as f:
+                compose = _yaml.safe_load(f)
+            services = compose.get("services") or {}
+            if not services:
+                continue
+            svc = next(iter(services.values()))
+            # Parse environment list into dict (skip runtime ${VAR} references)
+            env: dict[str, str] = {}
+            for e in svc.get("environment", []):
+                if isinstance(e, str) and "=" in e and not e.startswith("${"):
+                    k, v = e.split("=", 1)
+                    if not v.startswith("${"):
                         env[k.strip()] = v.strip()
+            # Extract host port (handle ${VAR:-default} syntax)
+            host_port = "8000"
+            for p in svc.get("ports", []):
+                ps = str(p).split(":")[0]
+                m = _re.search(r':-(\d+)', ps)
+                if m:
+                    host_port = m.group(1)
+                elif _re.match(r'^\d+$', ps):
+                    host_port = ps
+                break
+            # Detect type from command or environment
+            cmd = str(svc.get("command", ""))
+            is_whisper = "WHISPER_MODEL" in " ".join(
+                e for e in svc.get("environment", []) if isinstance(e, str)
+            )
+            if is_whisper:
+                models.append({
+                    "name": svc.get("container_name", name),
+                    "model": env.get("WHISPER_MODEL", name),
+                    "port": host_port,
+                    "served_name": svc.get("container_name", name),
+                    "memory_utilization": None,
+                    "type": "whisper",
+                    "language": env.get("WHISPER_LANGUAGE", "auto"),
+                })
+            else:
+                mem_util_m = _re.search(r'--gpu-memory-utilization\s+([\d.]+)', cmd)
+                mem_util = float(mem_util_m.group(1)) if mem_util_m else 0.85
+                model_m = _re.search(r'vllm serve\s+(\S+)', cmd)
+                hf_model = model_m.group(1) if model_m else ""
+                container_name = svc.get("container_name", f"{name}-vllm-1")
+                models.append({
+                    "name": name,
+                    "model": hf_model,
+                    "port": host_port,
+                    "served_name": container_name.replace("-vllm-1", ""),
+                    "memory_utilization": mem_util,
+                    "type": "vllm",
+                    "container_name": container_name,
+                })
         except Exception:
             continue
-        if 'VLLM_WHICH_GPU' in env:
-            raise ValueError(f"{f}: VLLM_WHICH_GPU must not be set in env files — GPU is selected automatically at deploy time")
-        models.append({
-            'name': name,
-            'model': env.get('VLLM_MODEL', ''),
-            'port': env.get('VLLM_PORT', '8000'),
-            'served_name': env.get('VLLM_SERVED_MODEL_NAME', name),
-            'memory_utilization': float(env.get('VLLM_GPU_MEMORY_UTILIZATION', '0.85')),
-        })
     return models
 
 
@@ -687,25 +722,10 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
         _deploy_locks[name] = asyncio.Lock()
     async with _deploy_locks[name]:
 
-        # Fetch model config to check memory requirement
+        # Fetch model config
         all_models = _read_llm_models(vd)
         model_cfg = next((x for x in all_models if x["name"] == req.model), None)
-
-        required_mib = None
-        gpu_status = _gpu_cache.get(name)
-        gpus = gpu_status.get("gpus", []) if gpu_status else []
-        if gpus:
-            # Always auto-select: pick the GPU with the most free memory
-            which_gpu = max(range(len(gpus)), key=lambda i: gpus[i]["memory_free_mib"])
-        else:
-            which_gpu = 0
-        if model_cfg:
-            gpu_status = _gpu_cache.get(name)
-            if gpu_status:
-                gpus = gpu_status.get("gpus", [])
-                if which_gpu < len(gpus):
-                    mem_util = model_cfg.get("memory_utilization", 0.85)
-                    required_mib = round(mem_util * gpus[which_gpu]["memory_total_mib"])
+        is_whisper = model_cfg.get("type") == "whisper" if model_cfg else False
 
         users = _load_users()
         user_hf = users.get(user["username"], {}).get("hf_token", "")
@@ -716,35 +736,49 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
                 detail="No HuggingFace token configured. Set your HF token in your profile before deploying.",
             )
 
+        gpu_status = _gpu_cache.get(name)
+        gpus = gpu_status.get("gpus", []) if gpu_status else []
+
+        if is_whisper:
+            # Whisper: no GPU selection or memory check needed
+            which_gpu = 0
+            memory_insufficient = False
+            wait_loop = ""
+        else:
+            # vLLM: auto-select GPU with most free memory
+            if gpus:
+                which_gpu = max(range(len(gpus)), key=lambda i: gpus[i]["memory_free_mib"])
+            else:
+                which_gpu = 0
+            required_mib = None
+            if model_cfg and model_cfg.get("memory_utilization") and which_gpu < len(gpus):
+                required_mib = round(model_cfg["memory_utilization"] * gpus[which_gpu]["memory_total_mib"])
+            free_mib = gpus[which_gpu]["memory_free_mib"] if which_gpu < len(gpus) else None
+            memory_insufficient = required_mib is not None and free_mib is not None and free_mib < required_mib
+            if memory_insufficient:
+                wait_loop = (
+                    f'echo "Waiting for GPU {which_gpu} to have {required_mib} MiB free..."; '
+                    f'while true; do '
+                    f'  _free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i {which_gpu} | tr -d " "); '
+                    f'  if [ "${{_free}}" -ge {required_mib} ]; then '
+                    f'    echo "GPU memory ready: ${{_free}} MiB free"; break; '
+                    f'  fi; '
+                    f'  echo "Need {required_mib} MiB, have ${{_free}} MiB — retrying in 60s..."; sleep 60; '
+                    f'done && '
+                )
+            else:
+                wait_loop = ""
+
         exports = (
             f'export VLLM_SERVED_MODEL_NAME="{req.model}" && '
             f'export VLLM_WHICH_GPU={which_gpu} && '
             f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
             f'export HF_TOKEN="{effective_hf}"'
         )
-
-        # Check if GPU memory is currently sufficient
-        free_mib = gpus[which_gpu]["memory_free_mib"] if which_gpu < len(gpus) else None
-        memory_insufficient = required_mib is not None and free_mib is not None and free_mib < required_mib
-
-        # Prepend a memory-wait loop only when GPU is currently too full
-        if memory_insufficient:
-            wait_loop = (
-                f'echo "Waiting for GPU {which_gpu} to have {required_mib} MiB free..."; '
-                f'while true; do '
-                f'  _free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i {which_gpu} | tr -d " "); '
-                f'  if [ "${{_free}}" -ge {required_mib} ]; then '
-                f'    echo "GPU memory ready: ${{_free}} MiB free"; break; '
-                f'  fi; '
-                f'  echo "Need {required_mib} MiB, have ${{_free}} MiB — retrying in 60s..."; sleep 60; '
-                f'done && '
-            )
-        else:
-            wait_loop = ""
         cmd = f"{wait_loop}{exports} && cd {vd} && bash remote.sh"
         result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
         result["memory_insufficient"] = memory_insufficient
-        container_name = f"{req.model}-vllm-1"
+        container_name = model_cfg.get("container_name", req.model) if model_cfg else req.model
         _deploy_records.append({
             "task_id": result["id"],
             "machine": name,
@@ -814,7 +848,7 @@ async def _check_idle_containers():
             key = f"{machine_name}:{container}"
 
             # Check for recent inference activity via "Finished request" in logs
-            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -c 'Finished request' || echo 0"
+            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -c 'Finished request\|Transcribed ' || echo 0"
             try:
                 res = await _agent_request(m, "POST", "/execute", json_body={"command": activity_cmd, "timeout": 10})
                 count = int(res.get("stdout", "0").strip())
@@ -870,7 +904,7 @@ async def _update_last_active():
             continue
         for container in containers:
             key = f"{machine_name}:{container}"
-            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -c 'Finished request' || echo 0"
+            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -c 'Finished request\|Transcribed ' || echo 0"
             try:
                 res = await _agent_request(m, "POST", "/execute", json_body={"command": activity_cmd, "timeout": 10})
                 count = int(res.get("stdout", "0").strip())

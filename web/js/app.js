@@ -343,7 +343,7 @@ function escapeHtml(str) {
 // ---------------------------------------------------------------------------
 // LLM Services
 // ---------------------------------------------------------------------------
-let _llmModels = (() => { try { return JSON.parse(localStorage.getItem('gpu_cmd_llm_models') || '[]'); } catch(_) { return []; } })();
+let _llmModels = (() => { try { const m = JSON.parse(localStorage.getItem('gpu_cmd_llm_models') || '[]'); return m.every(x => x.type) ? m : []; } catch(_) { return []; } })();
 let _llmRunning = {};     // { machineName: [...containers] }
 
 async function loadLLMTab() {
@@ -435,9 +435,10 @@ async function loadLLMTab() {
 }
 
 function renderDeployPanel(llmMachines) {
-    const modelOptions = _llmModels.map(m =>
-        `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)} — ${escapeHtml(m.model)}</option>`
-    ).join('');
+    const modelOptions = _llmModels.map(m => {
+        const tag = m.type === 'whisper' ? ` [whisper${m.language ? '·' + m.language : ''}]` : '';
+        return `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag} — ${escapeHtml(m.model)}</option>`;
+    }).join('');
 
     return `
         <h3 style="margin-bottom:14px">Deploy Model</h3>
@@ -466,48 +467,64 @@ function updateMachineTable(llmMachines) {
     const model = _llmModels.find(m => m.name === modelSel.value);
     if (!model) { tableDiv.innerHTML = ''; return; }
 
-    const memUtil = model.memory_utilization ?? 0.85;
-    let bestFree = -1;
     _bestMachine = null;
     _bestGpu = null;
 
-    // Expand each machine into one row per GPU
-    const rows = [];
-    for (const m of llmMachines) {
-        const gpus = m.gpu_cache?.gpus ?? [];
-        if (!m.online || gpus.length === 0) {
-            rows.push({ machine: m.name, gpuIdx: '—', required: null, free: null, fits: false, status: 'offline' });
-            continue;
+    if (model.type === 'whisper') {
+        // Whisper: no memory check, just pick first online machine
+        for (const m of llmMachines) {
+            if (m.online) { _bestMachine = m.name; break; }
         }
-        for (const gpu of gpus) {
-            const required = Math.round(memUtil * gpu.memory_total_mib);
-            const free = gpu.memory_free_mib;
-            const fits = free >= required;
-            // Always pick the GPU with most free memory, regardless of fit
-            if (free > bestFree) {
-                bestFree = free;
-                _bestMachine = m.name;
-                _bestGpu = gpu.index;
+        tableDiv.style.display = 'none';
+    } else {
+        const memUtil = model.memory_utilization ?? 0.85;
+        let bestFree = -1;
+
+        // Expand each machine into one row per GPU
+        const rows = [];
+        for (const m of llmMachines) {
+            const gpus = m.gpu_cache?.gpus ?? [];
+            if (!m.online || gpus.length === 0) {
+                rows.push({ machine: m.name, gpuIdx: '—', required: null, free: null, fits: false, status: 'offline' });
+                continue;
             }
-            rows.push({ machine: m.name, gpuIdx: gpu.index, required, free, fits, status: fits ? 'fits' : 'no fit' });
+            for (const gpu of gpus) {
+                const required = Math.round(memUtil * gpu.memory_total_mib);
+                const free = gpu.memory_free_mib;
+                const fits = free >= required;
+                if (free > bestFree) {
+                    bestFree = free;
+                    _bestMachine = m.name;
+                    _bestGpu = gpu.index;
+                }
+                rows.push({ machine: m.name, gpuIdx: gpu.index, required, free, fits, status: fits ? 'fits' : 'no fit' });
+            }
+        }
+
+        const bestFits = rows.find(r => r.machine === _bestMachine && r.gpuIdx === _bestGpu)?.fits ?? false;
+
+        if (_currentUser?.role === 'admin') tableDiv.style.display = 'block';
+        tableDiv.innerHTML = `<table class="task-table"><thead><tr>
+            <th>Machine</th><th>GPU</th><th>Required</th><th>Free</th><th>Status</th>
+        </tr></thead><tbody>${rows.map(r => `<tr${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' style="background:rgba(52,211,153,0.05)"' : ''}>
+            <td>${displayName(r.machine)}</td>
+            <td style="font-family:var(--mono)">${r.gpuIdx}</td>
+            <td style="font-family:var(--mono)">${r.required != null ? r.required + ' MiB' : '—'}</td>
+            <td style="font-family:var(--mono); color:${r.free != null ? (r.fits ? 'var(--green)' : 'var(--red)') : 'inherit'}">${r.free != null ? r.free + ' MiB' : '—'}</td>
+            <td><span class="task-status ${r.fits ? 'completed' : r.status === 'offline' ? 'cancelled' : 'failed'}">${r.status}${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' ★' : ''}</span></td>
+        </tr>`).join('')}</tbody></table>`;
+
+        const deployBtn = document.getElementById('llm-deploy-btn');
+        if (deployBtn && _bestMachine) {
+            deployBtn.disabled = false;
+            deployBtn.title = bestFits
+                ? `Will deploy on ${displayName(_bestMachine)} GPU${_bestGpu}`
+                : `Will queue on ${displayName(_bestMachine)} GPU${_bestGpu} — waiting for free memory`;
         }
     }
 
-    const bestFits = rows.find(r => r.machine === _bestMachine && r.gpuIdx === _bestGpu)?.fits ?? false;
-
-    if (_currentUser?.role === 'admin') tableDiv.style.display = 'block';
-    tableDiv.innerHTML = `<table class="task-table"><thead><tr>
-        <th>Machine</th><th>GPU</th><th>Required</th><th>Free</th><th>Status</th>
-    </tr></thead><tbody>${rows.map(r => `<tr${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' style="background:rgba(52,211,153,0.05)"' : ''}>
-        <td>${displayName(r.machine)}</td>
-        <td style="font-family:var(--mono)">${r.gpuIdx}</td>
-        <td style="font-family:var(--mono)">${r.required != null ? r.required + ' MiB' : '—'}</td>
-        <td style="font-family:var(--mono); color:${r.free != null ? (r.fits ? 'var(--green)' : 'var(--red)') : 'inherit'}">${r.free != null ? r.free + ' MiB' : '—'}</td>
-        <td><span class="task-status ${r.fits ? 'completed' : r.status === 'offline' ? 'cancelled' : 'failed'}">${r.status}${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' ★' : ''}</span></td>
-    </tr>`).join('')}</tbody></table>`;
-
     // Check if this model is already running somewhere
-    const containerName = `${model.name}-vllm-1`;
+    const containerName = model.container_name || model.name;
     let alreadyRunning = null;
     for (const [machineName, containers] of Object.entries(_llmRunning)) {
         const match = containers.find(c => c.name === containerName);
@@ -526,13 +543,6 @@ function updateMachineTable(llmMachines) {
         }
     }
 
-    const deployBtn = document.getElementById('llm-deploy-btn');
-    if (deployBtn && _bestMachine) {
-        deployBtn.disabled = false;
-        deployBtn.title = bestFits
-            ? `Will deploy on ${displayName(_bestMachine)} GPU${_bestGpu}`
-            : `Will queue on ${displayName(_bestMachine)} GPU${_bestGpu} — waiting for free memory`;
-    }
 }
 
 function renderRunningSection(m) {
