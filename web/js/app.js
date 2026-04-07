@@ -447,6 +447,12 @@ function renderDeployPanel(llmMachines) {
         </div>
         <div id="llm-already-running" style="display:none; margin-bottom:10px; padding:8px 14px; background:var(--green-lo); border:1px solid rgba(16,217,160,.3); border-radius:8px; font-size:13px; color:var(--green)"></div>
         <div id="llm-machine-table" style="margin-bottom:12px; display:none"></div>
+        <div class="cmd-row" style="margin-bottom:8px">
+            <label style="font-size:13px; color:var(--fg2); cursor:pointer">
+                <input type="checkbox" id="llm-force-build" style="margin-right:6px">
+                Rebuild image (FORCE_BUILD)
+            </label>
+        </div>
         <div class="cmd-row">
             <button id="llm-deploy-btn" onclick="deployLLM()">Deploy</button>
         </div>
@@ -608,7 +614,8 @@ async function deployLLM() {
     output.innerHTML = '<span class="spinner"></span> Submitting deploy task...';
 
     try {
-        const body = { model };
+        const forceBuild = document.getElementById('llm-force-build')?.checked || false;
+        const body = { model, force_build: forceBuild };
         const task = await api(`/api/machines/${_bestMachine}/llm/deploy`, {
             method: 'POST',
             body: JSON.stringify(body),

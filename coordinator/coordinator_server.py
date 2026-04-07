@@ -668,6 +668,7 @@ async def stop_llm_container(name: str, req: LLMStopRequest, user: dict = Depend
 
 class LLMDeployRequest(BaseModel):
     model: str           # env file stem, e.g. "qwen3dot5-35b-a3b"
+    force_build: bool = False  # rebuild Docker image before starting
 
 
 @app.get("/api/llm/my-tasks")
@@ -800,7 +801,9 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
 
         compose_dir = model_cfg.get("compose_dir", req.model) if model_cfg else req.model
         compose_service = model_cfg.get("compose_service", "") if model_cfg else ""
+        force_build_export = 'export FORCE_BUILD=1 && ' if req.force_build else ''
         exports = (
+            f'{force_build_export}'
             f'export VLLM_SERVED_MODEL_NAME="{compose_dir}" && '
             f'export COMPOSE_SERVICE="{compose_service}" && '
             f'export VLLM_WHICH_GPU={which_gpu} && '
