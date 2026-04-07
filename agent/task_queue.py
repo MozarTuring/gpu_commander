@@ -116,6 +116,7 @@ class TaskQueue:
             task.command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         task.pid = proc.pid
         self._running_procs[task.id] = proc
