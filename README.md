@@ -2,6 +2,16 @@
 
 A system to run commands, monitor GPUs, and manage task queues across multiple GPU machines.
 
+## Screenshots
+
+**LLM Services — deploy models and track task history**
+
+![LLM Services](docs/screenshot_deploy.png)
+
+**Running Services — live container status across all machines**
+
+![Running Services](docs/screenshot_services.png)
+
 ## Architecture
 
 - **Agent** — FastAPI daemon running on each GPU machine (exposes REST API)
