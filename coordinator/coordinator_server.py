@@ -810,7 +810,14 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
             f'export HF_TOKEN="{effective_hf}"'
         )
-        cmd = f"{wait_loop}{exports} && cd {vd} && bash remote.sh"
+        import os as _os
+        _run_dir_pre = str(_os.path.dirname(vd))
+        _vllm_proj = str(_os.path.basename(vd))
+        cmd = (
+            f"{wait_loop}{exports} && "
+            f"cd {_run_dir_pre} && "
+            f"bash -c 'source common_tools/meta_script.sh localmachine {_vllm_proj} remote_docker_compose'"
+        )
         result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
         result["memory_insufficient"] = memory_insufficient
         container_name = model_cfg.get("container_name", req.model) if model_cfg else req.model
@@ -822,6 +829,10 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             "username": user["username"],
             "submitted_at": time.time(),
             "which_gpu": which_gpu,
+            "hf_token": effective_hf,
+            "compose_dir": compose_dir,
+            "compose_service": compose_service,
+            "vllm_service_dir": vd,
         })
         _save_deploy_records()
         return result
