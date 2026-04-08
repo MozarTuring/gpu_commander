@@ -9,7 +9,7 @@
 
 PROJ_DIR="${RUN_DIR_PRE}/${RUN_PROJ}"
 AGENT_DIR="${PROJ_DIR}/agent"
-VENV_DIR="${PROJ_DIR}/.venv"
+VENV_DIR="${RUN_DIR_PRE}/.venvs/gpu_commander"
 
 # Pick config based on branch suffix: gpu_commander_main -> config.yaml, gpu_commander_dev -> config.dev.yaml
 _branch_suffix="${RUN_PROJ##*_}" # everything after last underscore
