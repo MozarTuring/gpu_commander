@@ -646,9 +646,9 @@ async function loadDeployTasks() {
     if (!body) return;
     try {
         const allTasks = await api('/api/llm/my-tasks');
-        // Dedup: keep only the latest entry per model+machine
+        // Dedup: keep only the latest entry per model
         const latest = new Map();
-        allTasks.forEach(t => latest.set(`${t.model}::${t.machine}`, t));
+        allTasks.forEach(t => latest.set(t.model, t));
         const tasks = [...latest.values()];
         if (tasks.length === 0) {
             body.innerHTML = '<div class="empty-state">No deploy tasks</div>';
