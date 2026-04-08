@@ -44,6 +44,7 @@ class TaskQueue:
     def __init__(self, persistence_dir: str = "/tmp/gpu_commander_tasks"):
         self._tasks: dict[str, Task] = {}
         self._running_procs: dict[str, asyncio.subprocess.Process] = {}
+        self._readopt_tasks: list[Task] = []
         self._persistence_dir = Path(persistence_dir)
         self._persistence_dir.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
@@ -75,14 +76,25 @@ class TaskQueue:
                     pid=d.get("pid"),
                     gpu_requirement=d.get("gpu_requirement", 0),
                 )
-                # Mark previously-running tasks as failed on restart
                 if task.status == TaskStatus.RUNNING:
-                    task.status = TaskStatus.FAILED
-                    task.stderr += "\n[Agent restarted — task marked as failed]"
-                    task.finished_at = time.time()
+                    if task.pid and self._is_pid_alive(task.pid):
+                        # Process still running — re-adopt it
+                        self._readopt_tasks.append(task)
+                    else:
+                        task.status = TaskStatus.FAILED
+                        task.stderr += "\n[Agent restarted — task marked as failed]"
+                        task.finished_at = time.time()
                 self._tasks[task.id] = task
         except (json.JSONDecodeError, KeyError):
             pass
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
 
     def _save_tasks(self) -> None:
         data = [t.to_dict() for t in self._tasks.values()]
@@ -92,6 +104,25 @@ class TaskQueue:
     def start_worker(self) -> None:
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker_loop())
+        # Re-adopt tasks whose PIDs survived the agent restart
+        for task in self._readopt_tasks:
+            asyncio.create_task(self._monitor_pid(task))
+        self._readopt_tasks.clear()
+
+    async def _monitor_pid(self, task: Task) -> None:
+        """Poll a surviving PID until it exits, then update task status."""
+        while self._is_pid_alive(task.pid):
+            await asyncio.sleep(5)
+        # Process exited — check exit code via waitpid
+        try:
+            _, wait_status = os.waitpid(task.pid, os.WNOHANG)
+            task.exit_code = os.WEXITSTATUS(wait_status) if os.WIFEXITED(wait_status) else -1
+        except ChildProcessError:
+            task.exit_code = 0  # not our child, assume success if it ran to completion
+        task.status = TaskStatus.COMPLETED if task.exit_code == 0 else TaskStatus.FAILED
+        task.finished_at = time.time()
+        async with self._lock:
+            self._save_tasks()
 
     async def _worker_loop(self) -> None:
         while True:
