@@ -392,7 +392,7 @@ async function loadLLMTab() {
     const accessHintHtml = `
         <div style="margin-bottom:12px; padding:12px 14px; background:var(--bg); border-radius:6px; border-left:3px solid var(--accent); font-family:var(--mono); font-size:11px; color:var(--text-mid); line-height:2">
             <span style="color:var(--accent); font-family:var(--sans); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">How to access a running service</span><br>
-            ssh -f -N -L <span style="color:var(--accent)">&lt;local_port&gt;</span>:localhost:<span style="color:var(--accent)">&lt;remote_port&gt;</span> ${_currentUser?.stellar_account || '[stellar_account]'}@ferragon.stellar.research.liu.se<br>
+            ssh -f -N -L <span style="color:var(--accent)">&lt;local_port&gt;</span>:localhost:<span style="color:var(--accent)">&lt;remote_port&gt;</span> ${_currentUser?.stellar_account || '[stellar_account]'}@<span style="color:var(--accent)">&lt;machine_name&gt;</span>.stellar.research.liu.se<br>
             curl http://localhost:<span style="color:var(--accent)">&lt;local_port&gt;</span>/v1/models
         </div>`;
 
