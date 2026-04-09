@@ -756,42 +756,57 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             memory_insufficient = False
             wait_loop = ""
         else:
-            # Find GPUs reserved by currently-starting containers on this machine
-            reserved_gpus: set[int] = set()
-            try:
-                list_cmd = "docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true"
-                res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
-                for line in res.get("stdout", "").splitlines():
-                    parts = line.strip().split("\t", 1)
-                    if len(parts) < 2:
-                        continue
-                    cname, cstatus = parts[0].strip(), parts[1].strip()
-                    if "health: starting" in cstatus:
-                        rec = next((r for r in _deploy_records if r["machine"] == name and r["container"] == cname), None)
-                        if rec and "which_gpu" in rec:
-                            reserved_gpus.add(int(rec["which_gpu"]))
-            except Exception:
-                pass
+            # Search all machines for the best available GPU (no ongoing deploy + most free memory)
+            best = None  # (machine_name, machine_obj, gpu_idx, free_mib, vllm_dir)
+            machines_to_check = [(name, m, vd)]  # prefer the requested machine first
+            for alt_name, alt_m in cfg.machines.items():
+                if alt_name != name and alt_m.vllm_service_dir and _machine_online.get(alt_name):
+                    alt_vd = alt_m.vllm_service_dir
+                    machines_to_check.append((alt_name, alt_m, alt_vd))
 
-            # Also reserve GPUs from in-progress deploy tasks (queued/running on agent)
-            for rec in _deploy_records:
-                if rec["machine"] != name or "which_gpu" not in rec:
+            for mname, mobj, mvd in machines_to_check:
+                mgpus = (_gpu_cache.get(mname) or {}).get("gpus", [])
+                if not mgpus:
                     continue
+                # Find reserved GPUs on this machine
+                reserved = set()
                 try:
-                    task = await _agent_request(m, "GET", f"/tasks/{rec['task_id']}", timeout=5)
-                    if task.get("status") in ("queued", "running"):
-                        reserved_gpus.add(int(rec["which_gpu"]))
+                    list_cmd = "docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true"
+                    res = await _agent_request(mobj, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
+                    for line in res.get("stdout", "").splitlines():
+                        parts = line.strip().split("\t", 1)
+                        if len(parts) < 2:
+                            continue
+                        cname, cstatus = parts[0].strip(), parts[1].strip()
+                        if "health: starting" in cstatus:
+                            rec = next((r for r in reversed(_deploy_records) if r["machine"] == mname and r["container"] == cname), None)
+                            if rec and "which_gpu" in rec:
+                                reserved.add(int(rec["which_gpu"]))
                 except Exception:
                     pass
+                for rec in _deploy_records:
+                    if rec["machine"] != mname or "which_gpu" not in rec:
+                        continue
+                    try:
+                        task = await _agent_request(mobj, "GET", f"/tasks/{rec['task_id']}", timeout=5)
+                        if task.get("status") in ("queued", "running"):
+                            reserved.add(int(rec["which_gpu"]))
+                    except Exception:
+                        pass
 
-            # vLLM: auto-select GPU with most free memory, excluding reserved GPUs
-            if gpus:
-                available = [i for i in range(len(gpus)) if i not in reserved_gpus]
-                if not available:
-                    raise HTTPException(status_code=409, detail="All GPUs have ongoing deploys. Wait for them to finish.")
-                which_gpu = max(available, key=lambda i: gpus[i]["memory_free_mib"])
-            else:
-                which_gpu = 0
+                for i, gpu in enumerate(mgpus):
+                    if i in reserved:
+                        continue
+                    free = gpu["memory_free_mib"]
+                    if best is None or free > best[3]:
+                        best = (mname, mobj, i, free, mvd)
+
+            if best is None:
+                raise HTTPException(status_code=409, detail="All GPUs on all machines have ongoing deploys. Wait for them to finish.")
+
+            name, m, which_gpu, _, vd = best
+            gpus = (_gpu_cache.get(name) or {}).get("gpus", [])
+
             required_mib = None
             if model_cfg and model_cfg.get("memory_utilization") and which_gpu < len(gpus):
                 required_mib = round(model_cfg["memory_utilization"] * gpus[which_gpu]["memory_total_mib"])
