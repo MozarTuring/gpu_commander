@@ -773,11 +773,23 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             except Exception:
                 pass
 
+            # Also reserve GPUs from in-progress deploy tasks (queued/running on agent)
+            for rec in _deploy_records:
+                if rec["machine"] != name or "which_gpu" not in rec:
+                    continue
+                try:
+                    task = await _agent_request(m, "GET", f"/tasks/{rec['task_id']}", timeout=5)
+                    if task.get("status") in ("queued", "running"):
+                        reserved_gpus.add(int(rec["which_gpu"]))
+                except Exception:
+                    pass
+
             # vLLM: auto-select GPU with most free memory, excluding reserved GPUs
             if gpus:
                 available = [i for i in range(len(gpus)) if i not in reserved_gpus]
-                pool = available if available else list(range(len(gpus)))
-                which_gpu = max(pool, key=lambda i: gpus[i]["memory_free_mib"])
+                if not available:
+                    raise HTTPException(status_code=409, detail="All GPUs have ongoing deploys. Wait for them to finish.")
+                which_gpu = max(available, key=lambda i: gpus[i]["memory_free_mib"])
             else:
                 which_gpu = 0
             required_mib = None

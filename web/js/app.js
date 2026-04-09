@@ -797,6 +797,7 @@ async function login() {
         updateUserDisplay();
         document.getElementById('login-password').value = '';
         if (_currentUser.setup_required) { showSetupModal(); return; }
+        document.querySelector('.tab[data-tab="llm"]')?.click();
         startPolling();
     } catch (e) {
         errorEl.textContent = 'Connection error';
