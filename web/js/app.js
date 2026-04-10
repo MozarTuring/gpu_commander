@@ -649,8 +649,9 @@ async function loadDeployTasks() {
         // Dedup: keep only the latest entry per model
         const latest = new Map();
         allTasks.forEach(t => latest.set(t.model, t));
-        // Filter out healthy containers — only show deploying/failed/running
+        // Filter out healthy/stopped containers — only show deploying/failed/running
         const tasks = [...latest.values()].filter(t => {
+            if (t.container_status === 'stopped') return false;
             if (t.container_status && t.container_status.includes('healthy') && !t.container_status.includes('starting')) return false;
             return true;
         });
