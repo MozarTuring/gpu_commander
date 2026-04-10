@@ -673,8 +673,7 @@ class LLMDeployRequest(BaseModel):
 
 @app.get("/api/llm/my-tasks")
 async def get_my_deploy_tasks(user: dict = Depends(require_auth)):
-    username = user["username"]
-    records = [r for r in _deploy_records if user["role"] == "admin" or r["username"] == username]
+    records = list(_deploy_records)  # all users' tasks visible to everyone
 
     # Fetch running containers once per machine (only for machines that have completed tasks)
     machines_needed = {r["machine"] for r in records}

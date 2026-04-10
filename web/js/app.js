@@ -413,9 +413,9 @@ async function loadLLMTab() {
     tasksPanel.style.marginBottom = '16px';
     tasksPanel.id = 'llm-tasks-panel';
     tasksPanel.innerHTML = `
-        <div class="panel-header"><span class="panel-label">My Deploy Tasks</span></div>
+        <div class="panel-header"><span class="panel-label">Deploying Tasks</span></div>
         ${accessHintHtml}
-        <div id="llm-tasks-body"><div class="empty-state">No deploy tasks</div></div>
+        <div id="llm-tasks-body"><div class="empty-state">No deploying tasks</div></div>
     `;
     grid.insertBefore(tasksPanel, deployPanel);
     loadDeployTasks();
@@ -649,13 +649,17 @@ async function loadDeployTasks() {
         // Dedup: keep only the latest entry per model
         const latest = new Map();
         allTasks.forEach(t => latest.set(t.model, t));
-        const tasks = [...latest.values()];
+        // Filter out healthy containers — only show deploying/failed/running
+        const tasks = [...latest.values()].filter(t => {
+            if (t.container_status && t.container_status.includes('healthy') && !t.container_status.includes('starting')) return false;
+            return true;
+        });
         if (tasks.length === 0) {
-            body.innerHTML = '<div class="empty-state">No deploy tasks</div>';
+            body.innerHTML = '<div class="empty-state">No deploying tasks</div>';
             return;
         }
         body.innerHTML = `<table class="task-table">
-            <thead><tr><th>Model</th><th>Machine</th><th>Status</th><th>Ports</th><th>Submitted</th><th></th></tr></thead>
+            <thead><tr><th>Model</th><th>Machine</th><th>Status</th><th>Ports</th><th>By</th><th>Submitted</th><th></th></tr></thead>
             <tbody>${tasks.map(t => {
                 const age = Math.round((Date.now()/1000 - t.submitted_at) / 60);
                 const canCancel = t.task_status === 'queued' || t.task_status === 'running';
@@ -672,6 +676,7 @@ async function loadDeployTasks() {
                     <td style="font-size:12px">${escapeHtml(displayName(t.machine))}</td>
                     <td>${statusCell}</td>
                     <td>${portsCell}</td>
+                    <td style="font-size:12px; color:var(--text-dim)">${escapeHtml(t.username || '')}</td>
                     <td style="font-size:12px; color:var(--text-dim)">${age}m ago</td>
                     <td>${canCancel ? `<button class="cancel-btn" onclick="cancelDeployTask('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}')">Cancel</button>` : ''}</td>
                 </tr>`;
