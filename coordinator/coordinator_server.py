@@ -696,16 +696,21 @@ async def get_my_deploy_tasks(user: dict = Depends(require_auth)):
         except Exception:
             pass
 
+    # Fetch all tasks per machine in one call instead of per-record
+    tasks_by_machine: dict[str, dict[str, str]] = {}  # machine -> {task_id: status}
+    for mname in machines_needed:
+        m = cfg.machines.get(mname)
+        if not m or not _machine_online.get(mname):
+            continue
+        try:
+            all_tasks = await _agent_request(m, "GET", "/tasks", params={"limit": 200}, timeout=10)
+            tasks_by_machine[mname] = {t["id"]: t["status"] for t in all_tasks}
+        except Exception:
+            pass
+
     result = []
     for r in records:
-        m = cfg.machines.get(r["machine"])
-        task_status = "unknown"
-        if m:
-            try:
-                task = await _agent_request(m, "GET", f"/tasks/{r['task_id']}", timeout=5)
-                task_status = task.get("status", "unknown")
-            except Exception:
-                pass
+        task_status = tasks_by_machine.get(r["machine"], {}).get(r["task_id"], "unknown")
         entry = {**r, "task_status": task_status}
         # For completed tasks, enrich with live Docker status and ports
         if task_status == "completed" and r.get("container"):
