@@ -125,6 +125,7 @@ _bootstrap_admin()
 
 # Paths that don't need authentication
 _UNPROTECTED = {"/", "/api/auth/login", "/api/version"}
+_UNPROTECTED_PREFIXES = ("/v1/", "/static/")
 
 def _check_request_auth(request: Request) -> dict | None:
     """Return user dict if authenticated, else None."""
@@ -153,7 +154,7 @@ app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    if request.url.path in _UNPROTECTED or request.url.path.startswith("/static/"):
+    if request.url.path in _UNPROTECTED or request.url.path.startswith(_UNPROTECTED_PREFIXES):
         return await call_next(request)
     if not _check_request_auth(request):
         return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
