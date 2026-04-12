@@ -2,7 +2,7 @@ coordinator:
   host: "0.0.0.0"
   port: 9800
   poll_interval: 10  # seconds between GPU status polls
-  host_machine: "custodian2ferragon"  # only this machine runs the coordinator
+  host_machine: "ferragon"  # only this machine runs the coordinator
 
 llm_idle:
   timeout_hours: 12     # stop a model after this many hours of inactivity
@@ -12,24 +12,24 @@ llm_idle:
 auth:
   token: "gpu-commander-secret-change-me"
 
-# Coordinator runs on custodian2ferragon.
+# Coordinator runs on ferragon.
 # - ferragon agent is on the same host -> localhost:9850
 # - greatrawr agent is reached directly by hostname -> port 9850
-# Access the coordinator UI locally via: ssh -f -N -L 9800:localhost:9800 custodian2ferragon
+# Access the coordinator UI locally via: ssh -f -N -L 9800:localhost:9800 ferragon
 
 machines:
-  custodian2ferragon:
+  ferragon:
     host: localhost             # coordinator co-located with this agent
     agent_port: 9850
-    ssh_alias: custodian2ferragon
+    ssh_alias: ferragon
     remote_dir: /home/custodian/project_remote_jwm/gpu_commander/agent
     description: "ferragon.stellar.research.liu.se"
     vllm_service_dir: /home/custodian/project_remote_jwm/vllm_service_main
 
-  custodian2greatrawr:
+  greatrawr:
     host: greatrawr.stellar.research.liu.se   # direct hostname from ferragon
     agent_port: 9850
-    ssh_alias: custodian2greatrawr
+    ssh_alias: greatrawr
     remote_dir: /home/custodian/project_remote_jwm/gpu_commander/agent
     description: "greatrawr.stellar.research.liu.se"
     vllm_service_dir: /home/custodian/project_remote_jwm/vllm_service_main

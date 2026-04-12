@@ -36,7 +36,7 @@ pip install fastapi 'uvicorn[standard]' httpx pyyaml click
 Uses the existing `meta_script.sh` workflow:
 
 ```bash
-cd /Users/maojingwei/baidu/project/ && source common_tools/meta_script.sh custodian2ferragon gpu_commander remote_
+cd /Users/maojingwei/baidu/project/ && source common_tools/meta_script.sh ferragon gpu_commander remote_
 cd /Users/maojingwei/baidu/project/ && source common_tools/meta_script.sh alvis1 gpu_commander remote_
 ```
 
@@ -61,17 +61,17 @@ gpu-cmd machines
 
 # GPU status
 gpu-cmd status                          # all machines
-gpu-cmd status custodian2ferragon       # one machine
+gpu-cmd status ferragon       # one machine
 
 # Run a command
-gpu-cmd run custodian2ferragon "nvidia-smi"
+gpu-cmd run ferragon "nvidia-smi"
 gpu-cmd run alvis1 "python train.py" --timeout 3600
-gpu-cmd run custodian2ferragon "python train.py" -bg  # background
+gpu-cmd run ferragon "python train.py" -bg  # background
 
 # Task queue
-gpu-cmd submit custodian2ferragon "python train.py --epochs 100"
-gpu-cmd tasks custodian2ferragon
-gpu-cmd cancel custodian2ferragon <task-id>
+gpu-cmd submit ferragon "python train.py --epochs 100"
+gpu-cmd tasks ferragon
+gpu-cmd cancel ferragon <task-id>
 ```
 
 ## Security

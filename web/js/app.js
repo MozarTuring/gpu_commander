@@ -331,7 +331,7 @@ function startPolling(interval = 10000) {
 // Util
 // ---------------------------------------------------------------------------
 function displayName(name) {
-    return (name || '').replace(/^custodian2/, '');
+    return name || '';
 }
 
 function escapeHtml(str) {
