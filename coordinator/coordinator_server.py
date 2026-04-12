@@ -125,7 +125,7 @@ _bootstrap_admin()
 
 # Paths that don't need authentication
 _UNPROTECTED = {"/", "/api/auth/login", "/api/version"}
-_UNPROTECTED_PREFIXES = ("/v1/", "/static/")
+_UNPROTECTED_PREFIXES = ("/v1/", "/static/", "/api/router/")
 
 def _check_request_auth(request: Request) -> dict | None:
     """Return user dict if authenticated, else None."""
@@ -851,6 +851,8 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
         _vllm_proj = str(_os.path.basename(vd))
         cmd = (
             f"{wait_loop}{exports} && "
+            f"export GPU_CMD_MACHINE_NAME={name} && "
+            f"export GPU_CMD_COORDINATOR_URL=http://{'localhost' if name == cfg.coordinator.host_machine else cfg.machines[cfg.coordinator.host_machine].description}:{cfg.coordinator.port} && "
             f"cd {_run_dir_pre} && "
             f"bash -c 'source common_tools/meta_script.sh localmachine {_vllm_proj} remote_docker_compose'"
         )
@@ -1035,6 +1037,47 @@ _routes_file = Path(_cfg_path).parent / "model_routes.json"
 _routes_cache: dict[str, list[dict]] = {}
 _routes_mtime: float = 0
 _routes_rr_idx: dict[str, int] = {}
+
+
+def _save_routes_file(routes: dict):
+    """Write routes to model_routes.json."""
+    with open(_routes_file, "w") as f:
+        json.dump(routes, f, indent=2)
+
+
+def _read_routes_file() -> dict:
+    """Read routes from model_routes.json."""
+    try:
+        with open(_routes_file) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+@app.post("/api/router/register")
+async def register_route(request: Request):
+    """Called by meta_script after container becomes healthy."""
+    body = await request.json()
+    model, machine, port = body["model"], body["machine"], body["port"]
+    routes = _read_routes_file()
+    routes.setdefault(model, [])
+    routes[model] = [e for e in routes[model] if e["machine"] != machine]
+    routes[model].append({"machine": machine, "port": port})
+    _save_routes_file(routes)
+    # Invalidate cache
+    global _routes_mtime
+    _routes_mtime = 0
+    print(f"[router] registered {model} -> {machine}:{port}")
+    return {"status": "ok"}
+
+
+@app.post("/api/router/unregister")
+async def unregister_route_api(request: Request):
+    """Called when a container is stopped."""
+    body = await request.json()
+    model, machine = body["model"], body["machine"]
+    _unregister_route(model, machine)
+    return {"status": "ok"}
 
 
 def _load_routes() -> dict[str, list[dict]]:
