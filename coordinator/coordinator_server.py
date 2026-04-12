@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
@@ -663,6 +663,10 @@ async def stop_llm_container(name: str, req: LLMStopRequest, user: dict = Depend
     result = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 30})
     if result.get("exit_code", 0) != 0:
         raise HTTPException(status_code=500, detail=result.get("stderr", "Failed to stop container"))
+    # Unregister from model routes
+    rec = next((r for r in reversed(_deploy_records) if r["machine"] == name and r["container"] == container), None)
+    if rec:
+        _unregister_route(rec["model"], name)
     return {"stopped": container}
 
 
@@ -948,6 +952,9 @@ async def _check_idle_containers():
                     event = {"time": now, "machine": machine_name, "container": container, "idle_hours": round(idle_s / 3600, 2)}
                     _idle_log.append(event)
                     del _container_last_active[key]
+                    rec = next((r for r in reversed(_deploy_records) if r["machine"] == machine_name and r["container"] == container), None)
+                    if rec:
+                        _unregister_route(rec["model"], machine_name)
                     print(f"[idle-stop] {machine_name}:{container} idle {idle_s/3600:.1f}h — stopped")
                 except Exception as e:
                     print(f"[idle-stop] failed to stop {machine_name}:{container}: {e}")
@@ -1015,6 +1022,121 @@ async def _idle_checker_loop():
     while True:
         await asyncio.sleep(check_interval_s)
         await _check_idle_containers()
+
+
+# ---------------------------------------------------------------------------
+# LLM Router — OpenAI-compatible proxy
+# ---------------------------------------------------------------------------
+# model_routes.json: { "model_name": [{"machine": "...", "host": "...", "port": 8007}, ...] }
+import os as _os
+_cfg_path = _os.environ.get("GPU_COMMANDER_CONFIG", str(Path(__file__).resolve().parent.parent / "config.yaml"))
+_routes_file = Path(_cfg_path).parent / "model_routes.json"
+_routes_cache: dict[str, list[dict]] = {}
+_routes_mtime: float = 0
+_routes_rr_idx: dict[str, int] = {}
+
+
+def _load_routes() -> dict[str, list[dict]]:
+    """Load routes from file, using mtime cache to avoid re-reading."""
+    global _routes_cache, _routes_mtime
+    try:
+        mt = _routes_file.stat().st_mtime
+        if mt != _routes_mtime:
+            with open(_routes_file) as f:
+                raw = json.load(f)
+            # Resolve machine names to hosts
+            resolved = {}
+            for model, endpoints in raw.items():
+                resolved[model] = []
+                for ep in endpoints:
+                    m = cfg.machines.get(ep["machine"])
+                    host = m.host if m else ep.get("host", "localhost")
+                    resolved[model].append({"machine": ep["machine"], "host": host, "port": ep["port"]})
+            _routes_cache = resolved
+            _routes_mtime = mt
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return _routes_cache
+
+
+def _unregister_route(model_name: str, machine_name: str):
+    """Remove a model endpoint from model_routes.json."""
+    try:
+        routes = json.load(open(_routes_file)) if _routes_file.exists() else {}
+        if model_name in routes:
+            routes[model_name] = [e for e in routes[model_name] if e["machine"] != machine_name]
+            if not routes[model_name]:
+                del routes[model_name]
+            with open(_routes_file, "w") as f:
+                json.dump(routes, f, indent=2)
+            print(f"[router] unregistered {model_name} on {machine_name}")
+    except Exception:
+        pass
+
+
+def _get_model_endpoint(model_name: str) -> dict:
+    """Pick an endpoint for a model using round-robin."""
+    routes = _load_routes()
+    endpoints = routes.get(model_name)
+    if not endpoints:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' is not running on any machine")
+    idx = _routes_rr_idx.get(model_name, 0) % len(endpoints)
+    _routes_rr_idx[model_name] = idx + 1
+    return endpoints[idx]
+
+
+@app.get("/v1/models")
+async def router_list_models():
+    routes = _load_routes()
+    return {"object": "list", "data": [
+        {"id": name, "object": "model", "owned_by": "vllm",
+         "endpoints": [f"{e['host']}:{e['port']}" for e in eps]}
+        for name, eps in routes.items()
+    ]}
+
+
+@app.post("/v1/chat/completions")
+async def router_chat_completions(request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model)
+    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/chat/completions", body, stream=body.get("stream", False))
+
+
+@app.post("/v1/completions")
+async def router_completions(request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model)
+    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/completions", body, stream=body.get("stream", False))
+
+
+@app.post("/v1/embeddings")
+async def router_embeddings(request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model)
+    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/embeddings", body)
+
+
+async def _proxy_request(url: str, body: dict, stream: bool = False):
+    if stream:
+        async def _stream():
+            async with httpx.AsyncClient(timeout=300) as client:
+                async with client.stream("POST", url, json=body) as resp:
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk
+        return StreamingResponse(_stream(), media_type="text/event-stream")
+    else:
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(url, json=body)
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
 
 
 # ---------------------------------------------------------------------------
