@@ -1172,6 +1172,28 @@ async def router_embeddings(request: Request):
     return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/embeddings", body)
 
 
+@app.post("/v1/audio/transcriptions")
+async def router_audio_transcriptions(request: Request):
+    form = await request.form()
+    model = form.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(str(model))
+    url = f"http://{ep['host']}:{ep['port']}/v1/audio/transcriptions"
+    # Forward multipart form data
+    files = {}
+    data = {}
+    for key, value in form.items():
+        if hasattr(value, "read"):
+            content = await value.read()
+            files[key] = (value.filename, content, value.content_type)
+        else:
+            data[key] = str(value)
+    async with httpx.AsyncClient(timeout=300) as client:
+        resp = await client.post(url, files=files, data=data)
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
+
 async def _proxy_request(url: str, body: dict, stream: bool = False):
     if stream:
         async def _stream():
