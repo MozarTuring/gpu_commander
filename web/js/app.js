@@ -440,10 +440,14 @@ function renderDeployPanel(llmMachines) {
         return `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag} — ${escapeHtml(m.model)}</option>`;
     }).join('');
 
+    const machineOptions = `<option value="auto">Auto</option>` +
+        llmMachines.map(m => `<option value="${escapeHtml(m.name)}">${escapeHtml(displayName(m.name))}</option>`).join('');
+
     return `
         <h3 style="margin-bottom:14px">Deploy Model</h3>
-        <div class="cmd-row" style="margin-bottom:12px">
+        <div class="cmd-row" style="margin-bottom:12px; gap:10px">
             <select id="llm-model-select" style="flex:2">${modelOptions}</select>
+            <select id="llm-machine-select" style="flex:1">${machineOptions}</select>
         </div>
         <div id="llm-already-running" style="display:none; margin-bottom:10px; padding:8px 14px; background:var(--green-lo); border:1px solid rgba(16,217,160,.3); border-radius:8px; font-size:13px; color:var(--green)"></div>
         <div id="llm-machine-table" style="margin-bottom:12px; display:none"></div>
@@ -509,7 +513,7 @@ function updateMachineTable(llmMachines) {
 
         const bestFits = rows.find(r => r.machine === _bestMachine && r.gpuIdx === _bestGpu)?.fits ?? false;
 
-        if (_currentUser?.role === 'admin') tableDiv.style.display = 'block';
+        tableDiv.style.display = 'block';
         tableDiv.innerHTML = `<table class="task-table"><thead><tr>
             <th>Machine</th><th>GPU</th><th>Required</th><th>Free</th><th>Status</th>
         </tr></thead><tbody>${rows.map(r => `<tr${r.machine === _bestMachine && r.gpuIdx === _bestGpu ? ' style="background:rgba(52,211,153,0.05)"' : ''}>
@@ -605,9 +609,11 @@ async function stopContainer(machineName, container) {
 
 async function deployLLM() {
     const model = document.getElementById('llm-model-select')?.value;
+    const machineChoice = document.getElementById('llm-machine-select')?.value || 'auto';
+    const targetMachine = machineChoice === 'auto' ? _bestMachine : machineChoice;
     const btn = document.getElementById('llm-deploy-btn');
     const output = document.getElementById('llm-output');
-    if (!model || !_bestMachine) return;
+    if (!model || !targetMachine) return;
 
     btn.disabled = true;
     output.style.display = 'block';
@@ -616,7 +622,7 @@ async function deployLLM() {
     try {
         const forceBuild = document.getElementById('llm-force-build')?.checked || false;
         const body = { model, force_build: forceBuild };
-        const task = await api(`/api/machines/${_bestMachine}/llm/deploy`, {
+        const task = await api(`/api/machines/${targetMachine}/llm/deploy`, {
             method: 'POST',
             body: JSON.stringify(body),
         });
@@ -624,7 +630,7 @@ async function deployLLM() {
         const queueMsg = task.memory_insufficient
             ? `\n\n⏳ GPU memory is full. Task will deploy automatically once memory frees up (checks every 60s). You can cancel it below in "My Deploy Tasks".`
             : `\n\nDeploy started. Track progress below in "My Deploy Tasks".`;
-        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${displayName(_bestMachine)}${gpuInfo}\nModel: ${model}${queueMsg}`;
+        output.textContent = `Task submitted — ID: ${task.id}\nMachine: ${displayName(targetMachine)}${gpuInfo}\nModel: ${model}${queueMsg}`;
         loadDeployTasks();
     } catch (err) {
         const msg = err.message.includes('409') || err.message.includes('Insufficient')

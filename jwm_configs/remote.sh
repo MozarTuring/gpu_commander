@@ -63,6 +63,25 @@ pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || true
 pkill -f 'uvicorn.*agent_server' 2>/dev/null || true
 sleep 1
 
+# Wait for a uvicorn service to start by watching its log.
+# Usage: wait_for_startup <name> <log_file>
+wait_for_startup() {
+    local name="$1" log="$2"
+    if timeout 15 tail -f "$log" 2>/dev/null | grep -qm1 -E 'Application startup complete|Error|Traceback'; then
+        if grep -q 'Application startup complete' "$log"; then
+            echo "${name} is UP"
+        else
+            echo "ERROR: ${name} failed to start:"
+            tail -20 "$log"
+            return 1
+        fi
+    else
+        echo "ERROR: ${name} startup timed out:"
+        tail -20 "$log" 2>/dev/null || true
+        return 1
+    fi
+}
+
 # Start agent using the venv python
 cd "${AGENT_DIR}"
 GPU_COMMANDER_TOKEN="${AUTH_TOKEN}" \
@@ -72,15 +91,7 @@ GPU_COMMANDER_TOKEN="${AUTH_TOKEN}" \
 AGENT_PID=$!
 echo "Agent started — PID: ${AGENT_PID}"
 
-sleep 3
-
-# Verify agent
-if curl -sf "http://localhost:${AGENT_PORT}/health" >/dev/null 2>&1; then
-    echo "Agent is UP on port ${AGENT_PORT}"
-else
-    echo "WARNING: Agent may not have started. Check ${AGENT_DIR}/agent.log"
-    tail -20 "${AGENT_DIR}/agent.log" 2>/dev/null || true
-fi
+wait_for_startup "Agent" agent.log || { return 1 2>/dev/null; exit 1; }
 
 # Start coordinator (only on the designated coordinator host)
 COORDINATOR_HOST=$(python3 -c "
@@ -110,16 +121,9 @@ GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
     >"${PROJ_DIR}/coordinator.log" 2>&1 &
 echo "Coordinator started — PID: $!"
 
-sleep 3
-if curl -sf "http://localhost:${COORDINATOR_PORT}/api/machines" >/dev/null 2>&1; then
-    echo "Coordinator is UP on port ${COORDINATOR_PORT}"
-else
-    echo "WARNING: Coordinator may not have started. Check ${PROJ_DIR}/coordinator.log"
-    tail -20 "${PROJ_DIR}/coordinator.log" 2>/dev/null || true
-fi
+wait_for_startup "Coordinator" "${PROJ_DIR}/coordinator.log" || { return 1 2>/dev/null; exit 1; }
 
 if false; then
-
     cd /Users/maojingwei/baidu/project/ && source common_tools/meta_script.sh custodian2ferragon gpu_commander remote_
 
     _coord_port=9800 && ssh -o ControlPath=none -f -N -L ${_coord_port}:localhost:${_coord_port} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes custodian2ferragon
