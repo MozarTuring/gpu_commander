@@ -25,6 +25,7 @@ class CoordinatorConfig:
     host: str = "0.0.0.0"
     port: int = 9800
     poll_interval: int = 10
+    host_machine: str = ""
 
 
 @dataclass
@@ -56,6 +57,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
         host=coord_raw.get("host", "0.0.0.0"),
         port=coord_raw.get("port", 9800),
         poll_interval=coord_raw.get("poll_interval", 10),
+        host_machine=coord_raw.get("host_machine", ""),
     )
 
     auth_token = raw.get("auth", {}).get("token", "gpu-commander-secret-change-me")
