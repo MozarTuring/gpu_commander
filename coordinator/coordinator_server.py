@@ -536,11 +536,14 @@ async def delete_hf_token():
 # ---------------------------------------------------------------------------
 
 def _read_llm_models(vllm_dir: str) -> list[dict]:
-    """Read model configs from per-model subdirectories containing docker-compose.yml."""
+    """Read model configs from llm_services/ subdirectory."""
     import os as _os, re as _re, yaml as _yaml
     models = []
-    for dir_name in sorted(_os.listdir(vllm_dir)):
-        compose_path = _os.path.join(vllm_dir, dir_name, "docker-compose.yml")
+    services_dir = _os.path.join(vllm_dir, "llm_services")
+    if not _os.path.isdir(services_dir):
+        return models
+    for dir_name in sorted(_os.listdir(services_dir)):
+        compose_path = _os.path.join(services_dir, dir_name, "docker-compose.yml")
         if not _os.path.isfile(compose_path):
             continue
         try:
