@@ -1059,15 +1059,15 @@ async def register_route(request: Request):
     """Called by meta_script after container becomes healthy."""
     body = await request.json()
     model, machine, port = body["model"], body["machine"], body["port"]
+    route_type = body.get("type", "api")  # "api", "website", or "both"
     routes = _read_routes_file()
     routes.setdefault(model, [])
     routes[model] = [e for e in routes[model] if e["machine"] != machine]
-    routes[model].append({"machine": machine, "port": port})
+    routes[model].append({"machine": machine, "port": port, "type": route_type})
     _save_routes_file(routes)
-    # Invalidate cache
     global _routes_mtime
     _routes_mtime = 0
-    print(f"[router] registered {model} -> {machine}:{port}")
+    print(f"[router] registered {model} ({route_type}) -> {machine}:{port}")
     return {"status": "ok"}
 
 
@@ -1095,7 +1095,7 @@ def _load_routes() -> dict[str, list[dict]]:
                 for ep in endpoints:
                     m = cfg.machines.get(ep["machine"])
                     host = m.host if m else ep.get("host", "localhost")
-                    resolved[model].append({"machine": ep["machine"], "host": host, "port": ep["port"]})
+                    resolved[model].append({"machine": ep["machine"], "host": host, "port": ep["port"], "type": ep.get("type", "api")})
             _routes_cache = resolved
             _routes_mtime = mt
     except (FileNotFoundError, json.JSONDecodeError):
@@ -1118,25 +1118,43 @@ def _unregister_route(model_name: str, machine_name: str):
         pass
 
 
-def _get_model_endpoint(model_name: str) -> dict:
-    """Pick an endpoint for a model using round-robin."""
+def _get_model_endpoint(model_name: str, kind: str = "api") -> dict:
+    """Pick an endpoint for a model using round-robin. kind: 'api' or 'website'."""
     routes = _load_routes()
-    endpoints = routes.get(model_name)
+    all_endpoints = routes.get(model_name) or []
+    endpoints = [e for e in all_endpoints if e.get("type", "api") == kind]
     if not endpoints:
-        raise HTTPException(status_code=404, detail=f"Model '{model_name}' is not running on any machine")
-    idx = _routes_rr_idx.get(model_name, 0) % len(endpoints)
-    _routes_rr_idx[model_name] = idx + 1
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' is not running as {kind} on any machine")
+    key = f"{model_name}:{kind}"
+    idx = _routes_rr_idx.get(key, 0) % len(endpoints)
+    _routes_rr_idx[key] = idx + 1
     return endpoints[idx]
 
 
 @app.get("/v1/models")
 async def router_list_models():
     routes = _load_routes()
-    return {"object": "list", "data": [
-        {"id": name, "object": "model", "owned_by": "vllm",
-         "endpoints": [f"{e['host']}:{e['port']}" for e in eps]}
-        for name, eps in routes.items()
-    ]}
+    data = []
+    for name, eps in routes.items():
+        api_eps = [e for e in eps if e.get("type", "api") == "api"]
+        if api_eps:
+            data.append({"id": name, "object": "model", "owned_by": "vllm",
+                         "endpoints": [f"{e['host']}:{e['port']}" for e in api_eps]})
+    return {"object": "list", "data": data}
+
+
+@app.get("/ui/")
+async def router_list_websites():
+    routes = _load_routes()
+    sites = []
+    for name, eps in routes.items():
+        web_eps = [e for e in eps if e.get("type", "api") == "website"]
+        if web_eps:
+            sites.append({"id": name, "url": f"/ui/{name}/"})
+    html = "<html><body><h2>Available UIs</h2><ul>" + "".join(
+        f'<li><a href="{s["url"]}">{s["id"]}</a></li>' for s in sites
+    ) + "</ul></body></html>"
+    return Response(content=html, media_type="text/html")
 
 
 @app.post("/v1/chat/completions")
@@ -1183,7 +1201,7 @@ async def router_images_generations(request: Request):
 @app.api_route("/ui/{model}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def router_ui_proxy(model: str, request: Request, path: str = ""):
     """Generic proxy for model web UIs and arbitrary endpoints."""
-    ep = _get_model_endpoint(model)
+    ep = _get_model_endpoint(model, kind="website")
     target_path = f"/{path}" if path else "/"
     if request.url.query:
         target_path += f"?{request.url.query}"
