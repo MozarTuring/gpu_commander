@@ -551,82 +551,62 @@ async def delete_hf_token():
 # ---------------------------------------------------------------------------
 
 def _read_llm_models(vllm_dir: str) -> list[dict]:
-    """Read model configs from llm_services/ subdirectory."""
+    """List every subdir of llm_services/ that has a docker-compose.yml."""
     import os as _os, re as _re, yaml as _yaml
     models = []
     services_dir = _os.path.join(vllm_dir, "llm_services")
     if not _os.path.isdir(services_dir):
         return models
     for dir_name in sorted(_os.listdir(services_dir)):
-        compose_path = _os.path.join(services_dir, dir_name, "docker-compose.yml")
+        model_dir = _os.path.join(services_dir, dir_name)
+        compose_path = _os.path.join(model_dir, "docker-compose.yml")
         if not _os.path.isfile(compose_path):
             continue
+        # Read .env for memory utilization (single source of truth)
+        mem_util = None
+        env_file = _os.path.join(model_dir, ".env")
+        if _os.path.isfile(env_file):
+            try:
+                with open(env_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("GPU_MEMORY_UTILIZATION="):
+                            mem_util = float(line.split("=", 1)[1])
+                            break
+            except (ValueError, IOError):
+                pass
+        # Detect model type and HF model name from compose
+        hf_model = ""
+        model_type = "other"
         try:
             with open(compose_path) as f:
                 compose = _yaml.safe_load(f)
-            services = compose.get("services") or {}
-            if not services:
-                continue
-            multi = len(services) > 1
-            for svc_name, svc in services.items():
-                # Parse environment list into dict (skip runtime ${VAR} references)
-                env: dict[str, str] = {}
-                for e in svc.get("environment", []):
-                    if isinstance(e, str) and "=" in e and not e.startswith("${"):
-                        k, v = e.split("=", 1)
-                        if not v.startswith("${"):
-                            env[k.strip()] = v.strip()
-                # Extract host port (handle ${VAR:-default} syntax)
-                host_port = "8000"
-                for p in svc.get("ports", []):
-                    ps = str(p).split(":")[0]
-                    m = _re.search(r':-(\d+)', ps)
-                    if m:
-                        host_port = m.group(1)
-                    elif _re.match(r'^\d+$', ps):
-                        host_port = ps
-                    break
-                container_name = svc.get("container_name", svc_name)
-                # For multi-service compose (e.g. whisper), model name = container name
-                # For single-service compose (vllm), model name = directory name
-                model_name = container_name if multi else dir_name
-                compose_service = svc_name if multi else ""
-
-                is_whisper = "WHISPER_MODEL" in " ".join(
-                    e for e in svc.get("environment", []) if isinstance(e, str)
-                )
-                if is_whisper:
-                    models.append({
-                        "name": model_name,
-                        "model": env.get("WHISPER_MODEL", svc_name),
-                        "port": host_port,
-                        "served_name": container_name,
-                        "memory_utilization": None,
-                        "type": "whisper",
-                        "language": env.get("WHISPER_LANGUAGE", "auto"),
-                        "container_name": container_name,
-                        "compose_dir": dir_name,
-                        "compose_service": compose_service,
-                    })
-                else:
-                    cmd = str(svc.get("command", ""))
-                    mem_util_m = _re.search(r'--gpu-memory-utilization\s+([\d.]+)', cmd)
-                    mem_util = float(mem_util_m.group(1)) if mem_util_m else 0.85
-                    model_m = _re.search(r'vllm serve\s+(\S+)', cmd)
-                    hf_model = model_m.group(1) if model_m else ""
-                    models.append({
-                        "name": model_name,
-                        "model": hf_model,
-                        "port": host_port,
-                        "served_name": container_name.replace("-vllm-1", ""),
-                        "memory_utilization": mem_util,
-                        "type": "vllm",
-                        "container_name": container_name,
-                        "compose_dir": dir_name,
-                        "compose_service": compose_service,
-                    })
+            svc = next(iter((compose.get("services") or {}).values()), {})
+            cmd = str(svc.get("command", ""))
+            env_list = [e for e in svc.get("environment", []) if isinstance(e, str)]
+            if "vllm serve" in cmd:
+                model_type = "vllm"
+                m = _re.search(r'vllm serve\s+(\S+)', cmd)
+                hf_model = m.group(1) if m else ""
+            elif any("WHISPER_MODEL" in e for e in env_list):
+                model_type = "whisper"
+                for e in env_list:
+                    if e.startswith("WHISPER_MODEL="):
+                        hf_model = e.split("=", 1)[1]
+                        break
+            else:
+                hf_model = str(svc.get("image", ""))
         except Exception:
-            continue
+            pass
+        models.append({
+            "name": dir_name,
+            "model": hf_model,
+            "memory_utilization": mem_util,
+            "type": model_type,
+            "container_name": dir_name,
+            "compose_dir": dir_name,
+            "compose_service": "",
+        })
     return models
 
 
