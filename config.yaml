@@ -5,7 +5,7 @@ coordinator:
   host_machine: "ferragon"  # only this machine runs the coordinator
 
 llm_idle:
-  timeout_hours: 12     # stop a model after this many hours of inactivity
+  timeout_hours: 2400     # stop a model after this many hours of inactivity
   check_interval_hours: 0.5  # how often to run the idle check
   last_active_interval: 30  # seconds between last-active updates for display
 

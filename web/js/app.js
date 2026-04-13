@@ -362,9 +362,12 @@ async function loadLLMTab() {
 
     // Fetch models from first online vllm machine (same repo on all machines)
     const sourceMachine = llmMachines.find(m => m.online);
-    if (sourceMachine && _llmModels.length === 0) {
-        _llmModels = await api(`/api/machines/${sourceMachine.name}/llm/models`).catch(() => []);
-        if (_llmModels.length > 0) localStorage.setItem('gpu_cmd_llm_models', JSON.stringify(_llmModels));
+    if (sourceMachine) {
+        const fresh = await api(`/api/machines/${sourceMachine.name}/llm/models`).catch(() => null);
+        if (fresh && fresh.length > 0) {
+            _llmModels = fresh;
+            localStorage.setItem('gpu_cmd_llm_models', JSON.stringify(_llmModels));
+        }
     }
 
     // Fetch running containers + idle status in parallel
