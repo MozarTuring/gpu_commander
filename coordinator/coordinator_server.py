@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
@@ -125,7 +125,7 @@ _bootstrap_admin()
 
 # Paths that don't need authentication
 _UNPROTECTED = {"/", "/api/auth/login", "/api/version"}
-_UNPROTECTED_PREFIXES = ("/v1/", "/static/", "/api/router/")
+_UNPROTECTED_PREFIXES = ("/v1/", "/static/", "/api/router/", "/ui/")
 
 def _check_request_auth(request: Request) -> dict | None:
     """Return user dict if authenticated, else None."""
@@ -1177,6 +1177,26 @@ async def router_images_generations(request: Request):
         raise HTTPException(status_code=400, detail="Missing 'model' field")
     ep = _get_model_endpoint(model)
     return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/images/generations", body)
+
+
+@app.api_route("/ui/{model}", methods=["GET", "POST", "PUT", "DELETE"])
+@app.api_route("/ui/{model}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def router_ui_proxy(model: str, request: Request, path: str = ""):
+    """Generic proxy for model web UIs and arbitrary endpoints."""
+    ep = _get_model_endpoint(model)
+    target_path = f"/{path}" if path else "/"
+    if request.url.query:
+        target_path += f"?{request.url.query}"
+    url = f"http://{ep['host']}:{ep['port']}{target_path}"
+    body = await request.body()
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+    async with httpx.AsyncClient(timeout=300, follow_redirects=False) as client:
+        resp = await client.request(request.method, url, content=body, headers=headers)
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            headers={k: v for k, v in resp.headers.items() if k.lower() not in ("transfer-encoding", "content-encoding", "content-length")},
+        )
 
 
 @app.post("/v1/audio/transcriptions")
