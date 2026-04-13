@@ -719,6 +719,16 @@ async function loadSettings() {
     }
     await loadUserManagement();
 
+    // Idle timeout (admin only)
+    const idlePanel = document.getElementById('idle-timeout-panel');
+    if (_currentUser?.role === 'admin') {
+        idlePanel.style.display = '';
+        try {
+            const idle = await api('/api/llm/idle-status');
+            document.getElementById('idle-timeout-days').value = (idle.timeout_hours / 24).toFixed(1);
+        } catch (_) {}
+    }
+
     // Pre-fill profile fields
     const stellarInput = document.getElementById('settings-stellar');
     if (stellarInput && _currentUser?.stellar_account) stellarInput.value = _currentUser.stellar_account;
@@ -738,6 +748,17 @@ async function saveHFToken() {
         alert('Failed to save token: ' + e.message);
     } finally {
         btn.disabled = false;
+    }
+}
+
+async function saveIdleTimeout() {
+    const days = parseFloat(document.getElementById('idle-timeout-days').value);
+    if (isNaN(days) || days <= 0) { alert('Enter a valid number of days'); return; }
+    try {
+        await api('/api/settings/idle-timeout', { method: 'POST', body: JSON.stringify({ timeout_hours: days * 24 }) });
+        document.getElementById('idle-timeout-status').textContent = `Saved: ${days} days (${days * 24}h)`;
+    } catch (e) {
+        alert('Failed to save: ' + e.message);
     }
 }
 

@@ -33,7 +33,7 @@ if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
 fi
 source "${VENV_DIR}/bin/activate"
 
-pip install -q fastapi 'uvicorn[standard]' pyyaml httpx 2>&1 | tail -3
+pip install -q fastapi 'uvicorn[standard]' pyyaml httpx python-multipart 2>&1 | tail -3
 
 AGENT_PORT=$(python3 -c "
 import yaml

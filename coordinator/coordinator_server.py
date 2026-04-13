@@ -523,6 +523,21 @@ async def set_hf_token(req: HFTokenRequest):
     masked = f"hf_{'*' * 16}{_hf_token[-4:]}" if _hf_token else ""
     return {"hf_token_set": bool(_hf_token), "hf_token_masked": masked}
 
+@app.post("/api/settings/idle-timeout")
+async def set_idle_timeout(request: Request, user: dict = Depends(require_admin)):
+    body = await request.json()
+    hours = float(body["timeout_hours"])
+    cfg.llm_idle.timeout_hours = hours
+    # Persist to config.yaml
+    import yaml as _yaml
+    with open(_cfg_path) as f:
+        raw = _yaml.safe_load(f)
+    raw.setdefault("llm_idle", {})["timeout_hours"] = hours
+    with open(_cfg_path, "w") as f:
+        _yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+    return {"timeout_hours": hours}
+
+
 @app.delete("/api/settings/hf-token")
 async def delete_hf_token():
     global _hf_token
