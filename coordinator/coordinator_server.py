@@ -931,7 +931,8 @@ async def _check_idle_containers():
             key = f"{machine_name}:{container}"
 
             # Check for recent inference activity via "Finished request" in logs
-            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -c 'Finished request\|Transcribed ' || echo 0"
+            # Count HTTP requests excluding health/metrics endpoints (works for any web service)
+            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -E '\"(GET|POST|PUT) /' | grep -vE '/(health|metrics|ping|status)' | wc -l"
             try:
                 res = await _agent_request(m, "POST", "/execute", json_body={"command": activity_cmd, "timeout": 10})
                 count = int(res.get("stdout", "0").strip())
@@ -990,7 +991,8 @@ async def _update_last_active():
             continue
         for container in containers:
             key = f"{machine_name}:{container}"
-            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -c 'Finished request\|Transcribed ' || echo 0"
+            # Count HTTP requests excluding health/metrics endpoints (works for any web service)
+            activity_cmd = f"docker logs --since {check_minutes}m {container} 2>&1 | grep -E '\"(GET|POST|PUT) /' | grep -vE '/(health|metrics|ping|status)' | wc -l"
             try:
                 res = await _agent_request(m, "POST", "/execute", json_body={"command": activity_cmd, "timeout": 10})
                 count = int(res.get("stdout", "0").strip())
