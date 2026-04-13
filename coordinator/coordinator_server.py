@@ -1169,6 +1169,16 @@ async def router_embeddings(request: Request):
     return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/embeddings", body)
 
 
+@app.post("/v1/images/generations")
+async def router_images_generations(request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model)
+    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/images/generations", body)
+
+
 @app.post("/v1/audio/transcriptions")
 async def router_audio_transcriptions(request: Request):
     form = await request.form()
