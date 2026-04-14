@@ -343,7 +343,7 @@ function escapeHtml(str) {
 // ---------------------------------------------------------------------------
 // LLM Services
 // ---------------------------------------------------------------------------
-let _llmModels = (() => { try { const m = JSON.parse(localStorage.getItem('gpu_cmd_llm_models') || '[]'); return m.every(x => x.type) ? m : []; } catch(_) { return []; } })();
+let _llmModels = (() => { try { const m = JSON.parse(localStorage.getItem('gpu_cmd_llm_models') || '[]'); return m.every(x => x.type && x.category) ? m : []; } catch(_) { return []; } })();
 let _llmRunning = {};     // { machineName: [...containers] }
 
 async function loadLLMTab() {
@@ -395,8 +395,8 @@ async function loadLLMTab() {
     const accessHintHtml = `
         <div style="margin-bottom:12px; padding:12px 14px; background:var(--bg); border-radius:6px; border-left:3px solid var(--accent); font-family:var(--mono); font-size:11px; color:var(--text-mid); line-height:2">
             <span style="color:var(--accent); font-family:var(--sans); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">How to access a running service</span><br>
-            ssh -f -N -L <span style="color:var(--accent)">&lt;local_port&gt;</span>:localhost:<span style="color:var(--accent)">&lt;remote_port&gt;</span> ${_currentUser?.stellar_account || '[stellar_account]'}@<span style="color:var(--accent)">&lt;machine_name&gt;</span>.stellar.research.liu.se<br>
-            curl http://localhost:<span style="color:var(--accent)">&lt;local_port&gt;</span>/v1/models
+            <span style="color:var(--text-dim)">Direct:</span> ssh -f -N -L <span style="color:var(--accent)">&lt;local_port&gt;</span>:localhost:<span style="color:var(--accent)">&lt;remote_port&gt;</span> ${_currentUser?.stellar_account || '[stellar_account]'}@<span style="color:var(--accent)">&lt;machine_name&gt;</span>.stellar.research.liu.se<br>
+            <span style="color:var(--text-dim)">Proxy:</span> curl http://localhost:9800/<span style="color:var(--accent)">&lt;text|audio|ui&gt;</span>/v1/models
         </div>`;
 
     // Per-machine running services
@@ -438,9 +438,14 @@ async function loadLLMTab() {
 }
 
 function renderDeployPanel(llmMachines) {
-    const modelOptions = _llmModels.map(m => {
-        const tag = m.type === 'whisper' ? ` [whisper${m.language ? '·' + m.language : ''}]` : '';
-        return `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag} — ${escapeHtml(m.model)}</option>`;
+    const categories = [...new Set(_llmModels.map(m => m.category || 'text'))].sort();
+    const modelOptions = categories.map(cat => {
+        const catModels = _llmModels.filter(m => (m.category || 'text') === cat);
+        const opts = catModels.map(m => {
+            const tag = m.type === 'whisper' ? ` [whisper${m.language ? '·' + m.language : ''}]` : '';
+            return `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag} — ${escapeHtml(m.model)}</option>`;
+        }).join('');
+        return `<optgroup label="${cat.toUpperCase()}">${opts}</optgroup>`;
     }).join('');
 
     const machineOptions = `<option value="auto">Auto</option>` +
@@ -669,10 +674,11 @@ async function loadDeployTasks() {
             return;
         }
         body.innerHTML = `<table class="task-table">
-            <thead><tr><th>Model</th><th>Machine</th><th>Status</th><th>Ports</th><th>By</th><th>Submitted</th><th></th></tr></thead>
+            <thead><tr><th>Model</th><th>Category</th><th>Machine</th><th>Status</th><th>Ports</th><th>By</th><th>Submitted</th><th></th></tr></thead>
             <tbody>${tasks.map(t => {
                 const age = Math.round((Date.now()/1000 - t.submitted_at) / 60);
                 const canCancel = t.task_status === 'queued' || t.task_status === 'running';
+                const cat = t.category || 'text';
                 const statusCell = t.container_status
                     ? t.container_status === 'not found'
                         ? `<span style="font-family:var(--mono); font-size:11px; color:var(--red)">deploy failed</span>`
@@ -683,6 +689,7 @@ async function loadDeployTasks() {
                     : '—';
                 return `<tr>
                     <td style="font-family:var(--mono); font-size:12px">${escapeHtml(t.model)}</td>
+                    <td style="font-size:11px; color:var(--text-dim); text-transform:uppercase">${escapeHtml(cat)}</td>
                     <td style="font-size:12px">${escapeHtml(displayName(t.machine))}</td>
                     <td>${statusCell}</td>
                     <td>${portsCell}</td>
@@ -1006,14 +1013,18 @@ function showAccessModal() {
     }
 
     const rows = allContainers.map(({ machineName, hostDesc, container, hostPort }) => {
+        const modelName = container.name.replace(/-vllm-1$/, '');
+        const modelCfg = _llmModels.find(m => m.name === modelName || m.container_name === container.name);
+        const category = modelCfg?.category || 'text';
         const sshCmd = `ssh -f -N -L ${hostPort}:localhost:${hostPort} ${stellarAccount}@${hostDesc}`;
         const curlCmd = `curl http://localhost:${hostPort}/v1/models`;
         const chatCmd = `curl http://localhost:${hostPort}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
-  -d '{"model":"${container.name.replace(/-vllm-1$/, '')}","messages":[{"role":"user","content":"Hello!"}]}'`;
+  -d '{"model":"${modelName}","messages":[{"role":"user","content":"Hello!"}]}'`;
+        const proxyNote = `Or via coordinator: /${category}/v1/chat/completions  (model: "${modelName}")`;
         return `<div class="model-access-row">
-            <div class="model-access-name">${escapeHtml(container.name.replace(/-vllm-1$/, ''))}
-                <span style="font-family:var(--font); font-size:11px; color:var(--text-dim); font-weight:400"> — ${escapeHtml(displayName(machineName))} · port ${hostPort}</span>
+            <div class="model-access-name">${escapeHtml(modelName)}
+                <span style="font-family:var(--font); font-size:11px; color:var(--text-dim); font-weight:400"> — ${escapeHtml(displayName(machineName))} · port ${hostPort} · ${category}</span>
             </div>
             <div class="access-step-label" style="margin-top:8px">1. Forward port</div>
             <div class="access-cmd">${escapeHtml(sshCmd)}</div>
@@ -1021,6 +1032,8 @@ function showAccessModal() {
             <div class="access-cmd">${escapeHtml(curlCmd)}</div>
             <div class="access-step-label" style="margin-top:8px">3. Chat</div>
             <div class="access-cmd" style="white-space:pre">${escapeHtml(chatCmd)}</div>
+            <div class="access-step-label" style="margin-top:8px">Coordinator proxy</div>
+            <div class="access-cmd">${escapeHtml(proxyNote)}</div>
         </div>`;
     }).join('');
 

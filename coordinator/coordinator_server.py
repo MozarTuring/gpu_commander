@@ -125,7 +125,7 @@ _bootstrap_admin()
 
 # Paths that don't need authentication
 _UNPROTECTED = {"/", "/api/auth/login", "/api/version"}
-_UNPROTECTED_PREFIXES = ("/v1/", "/static/", "/api/router/", "/ui/")
+_UNPROTECTED_PREFIXES = ("/v1/", "/text/", "/audio/", "/static/", "/api/router/", "/ui/")
 
 def _check_request_auth(request: Request) -> dict | None:
     """Return user dict if authenticated, else None."""
@@ -551,62 +551,65 @@ async def delete_hf_token():
 # ---------------------------------------------------------------------------
 
 def _read_llm_models(vllm_dir: str) -> list[dict]:
-    """List every subdir of llm_services/ that has a docker-compose.yml."""
+    """List models from llm_services/{category}/{model}/ structure."""
     import os as _os, re as _re, yaml as _yaml
     models = []
     services_dir = _os.path.join(vllm_dir, "llm_services")
     if not _os.path.isdir(services_dir):
         return models
-    for dir_name in sorted(_os.listdir(services_dir)):
-        model_dir = _os.path.join(services_dir, dir_name)
-        compose_path = _os.path.join(model_dir, "docker-compose.yml")
-        if not _os.path.isfile(compose_path):
+    for category in sorted(_os.listdir(services_dir)):
+        category_dir = _os.path.join(services_dir, category)
+        if not _os.path.isdir(category_dir) or category.startswith("."):
             continue
-        # Read .env for memory utilization (single source of truth)
-        mem_util = None
-        env_file = _os.path.join(model_dir, ".env")
-        if _os.path.isfile(env_file):
+        for dir_name in sorted(_os.listdir(category_dir)):
+            model_dir = _os.path.join(category_dir, dir_name)
+            compose_path = _os.path.join(model_dir, "docker-compose.yml")
+            if not _os.path.isfile(compose_path):
+                continue
+            mem_util = None
+            env_file = _os.path.join(model_dir, ".env")
+            if _os.path.isfile(env_file):
+                try:
+                    with open(env_file) as f:
+                        for line in f:
+                            line = line.strip()
+                            if line.startswith("GPU_MEMORY_UTILIZATION="):
+                                mem_util = float(line.split("=", 1)[1])
+                                break
+                except (ValueError, IOError):
+                    pass
+            hf_model = ""
+            model_type = "other"
             try:
-                with open(env_file) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith("GPU_MEMORY_UTILIZATION="):
-                            mem_util = float(line.split("=", 1)[1])
+                with open(compose_path) as f:
+                    compose = _yaml.safe_load(f)
+                svc = next(iter((compose.get("services") or {}).values()), {})
+                cmd = str(svc.get("command", ""))
+                env_list = [e for e in svc.get("environment", []) if isinstance(e, str)]
+                if "vllm serve" in cmd:
+                    model_type = "vllm"
+                    m = _re.search(r'vllm serve\s+(\S+)', cmd)
+                    hf_model = m.group(1) if m else ""
+                elif any("WHISPER_MODEL" in e for e in env_list):
+                    model_type = "whisper"
+                    for e in env_list:
+                        if e.startswith("WHISPER_MODEL="):
+                            hf_model = e.split("=", 1)[1]
                             break
-            except (ValueError, IOError):
+                else:
+                    hf_model = str(svc.get("image", ""))
+            except Exception:
                 pass
-        # Detect model type and HF model name from compose
-        hf_model = ""
-        model_type = "other"
-        try:
-            with open(compose_path) as f:
-                compose = _yaml.safe_load(f)
-            svc = next(iter((compose.get("services") or {}).values()), {})
-            cmd = str(svc.get("command", ""))
-            env_list = [e for e in svc.get("environment", []) if isinstance(e, str)]
-            if "vllm serve" in cmd:
-                model_type = "vllm"
-                m = _re.search(r'vllm serve\s+(\S+)', cmd)
-                hf_model = m.group(1) if m else ""
-            elif any("WHISPER_MODEL" in e for e in env_list):
-                model_type = "whisper"
-                for e in env_list:
-                    if e.startswith("WHISPER_MODEL="):
-                        hf_model = e.split("=", 1)[1]
-                        break
-            else:
-                hf_model = str(svc.get("image", ""))
-        except Exception:
-            pass
-        models.append({
-            "name": dir_name,
-            "model": hf_model,
-            "memory_utilization": mem_util,
-            "type": model_type,
-            "container_name": dir_name,
-            "compose_dir": dir_name,
-            "compose_service": "",
-        })
+            models.append({
+                "name": dir_name,
+                "model": hf_model,
+                "memory_utilization": mem_util,
+                "type": model_type,
+                "category": category,
+                "container_name": dir_name,
+                "compose_dir": f"{category}/{dir_name}",
+                "compose_service": "",
+            })
     return models
 
 
@@ -838,7 +841,8 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
         force_build_export = 'export FORCE_BUILD=1 && ' if req.force_build else ''
         exports = (
             f'{force_build_export}'
-            f'export VLLM_SERVED_MODEL_NAME="{compose_dir}" && '
+            f'export VLLM_SERVED_MODEL_NAME="{req.model}" && '
+            f'export MODEL_DIR="{compose_dir}" && '
             f'export COMPOSE_SERVICE="{compose_service}" && '
             f'export VLLM_WHICH_GPU={which_gpu} && '
             f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
@@ -857,11 +861,13 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
         result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
         result["memory_insufficient"] = memory_insufficient
         container_name = model_cfg.get("container_name", req.model) if model_cfg else req.model
+        category = model_cfg.get("category", "text") if model_cfg else "text"
         _deploy_records.append({
             "task_id": result["id"],
             "machine": name,
             "model": req.model,
             "container": container_name,
+            "category": category,
             "username": user["username"],
             "submitted_at": time.time(),
             "which_gpu": which_gpu,
@@ -1060,14 +1066,15 @@ async def register_route(request: Request):
     body = await request.json()
     model, machine, port = body["model"], body["machine"], body["port"]
     route_type = body.get("type", "api")  # "api", "website", or "both"
+    category = body.get("category", "text")
     routes = _read_routes_file()
     routes.setdefault(model, [])
     routes[model] = [e for e in routes[model] if e["machine"] != machine]
-    routes[model].append({"machine": machine, "port": port, "type": route_type})
+    routes[model].append({"machine": machine, "port": port, "type": route_type, "category": category})
     _save_routes_file(routes)
     global _routes_mtime
     _routes_mtime = 0
-    print(f"[router] registered {model} ({route_type}) -> {machine}:{port}")
+    print(f"[router] registered {model} ({category}/{route_type}) -> {machine}:{port}")
     return {"status": "ok"}
 
 
@@ -1088,14 +1095,16 @@ def _load_routes() -> dict[str, list[dict]]:
         if mt != _routes_mtime:
             with open(_routes_file) as f:
                 raw = json.load(f)
-            # Resolve machine names to hosts
             resolved = {}
             for model, endpoints in raw.items():
                 resolved[model] = []
                 for ep in endpoints:
                     m = cfg.machines.get(ep["machine"])
                     host = m.host if m else ep.get("host", "localhost")
-                    resolved[model].append({"machine": ep["machine"], "host": host, "port": ep["port"], "type": ep.get("type", "api")})
+                    resolved[model].append({
+                        "machine": ep["machine"], "host": host, "port": ep["port"],
+                        "type": ep.get("type", "api"), "category": ep.get("category", "text"),
+                    })
             _routes_cache = resolved
             _routes_mtime = mt
     except (FileNotFoundError, json.JSONDecodeError):
@@ -1118,18 +1127,102 @@ def _unregister_route(model_name: str, machine_name: str):
         pass
 
 
-def _get_model_endpoint(model_name: str, kind: str = "api") -> dict:
-    """Pick an endpoint for a model using round-robin. kind: 'api' or 'website'."""
+def _get_model_endpoint(model_name: str, kind: str = "api", category: str | None = None) -> dict:
+    """Pick an endpoint for a model using round-robin.
+    kind: 'api', 'website', or 'api-other'.
+    category: if set, also filter by category (text/audio/ui)."""
     routes = _load_routes()
     all_endpoints = routes.get(model_name) or []
     endpoints = [e for e in all_endpoints if e.get("type", "api") == kind]
+    if category:
+        endpoints = [e for e in endpoints if e.get("category", "text") == category]
     if not endpoints:
-        raise HTTPException(status_code=404, detail=f"Model '{model_name}' is not running as {kind} on any machine")
-    key = f"{model_name}:{kind}"
+        detail = f"Model '{model_name}' is not running as {kind}"
+        if category:
+            detail += f" in category '{category}'"
+        detail += " on any machine"
+        raise HTTPException(status_code=404, detail=detail)
+    key = f"{model_name}:{kind}:{category or '*'}"
     idx = _routes_rr_idx.get(key, 0) % len(endpoints)
     _routes_rr_idx[key] = idx + 1
     return endpoints[idx]
 
+
+# ---------------------------------------------------------------------------
+# Category-prefixed routes: /{category}/v1/...
+# ---------------------------------------------------------------------------
+
+_VALID_CATEGORIES = ("text", "audio", "ui")
+
+
+@app.get("/{category}/v1/models")
+async def router_list_models_by_category(category: str):
+    if category not in _VALID_CATEGORIES:
+        raise HTTPException(status_code=404, detail=f"Unknown category '{category}'")
+    routes = _load_routes()
+    data = []
+    for name, eps in routes.items():
+        cat_eps = [e for e in eps if e.get("category", "text") == category]
+        if cat_eps:
+            data.append({"id": name, "object": "model", "owned_by": "vllm",
+                         "category": category,
+                         "endpoints": [f"{e['host']}:{e['port']}" for e in cat_eps]})
+    return {"object": "list", "data": data}
+
+
+@app.post("/{category}/v1/chat/completions")
+async def router_cat_chat_completions(category: str, request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model, category=category)
+    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/chat/completions", body, stream=body.get("stream", False))
+
+
+@app.post("/{category}/v1/completions")
+async def router_cat_completions(category: str, request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model, category=category)
+    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/completions", body, stream=body.get("stream", False))
+
+
+@app.post("/{category}/v1/embeddings")
+async def router_cat_embeddings(category: str, request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model, category=category)
+    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/embeddings", body)
+
+
+@app.post("/{category}/v1/images/generations")
+async def router_cat_images_generations(category: str, request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model, category=category)
+    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/images/generations", body)
+
+
+@app.post("/{category}/v1/audio/transcriptions")
+async def router_cat_audio_transcriptions(category: str, request: Request):
+    form = await request.form()
+    model = form.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(str(model), category=category)
+    return await _forward_multipart(ep, form)
+
+
+# ---------------------------------------------------------------------------
+# Legacy routes (no category prefix) — kept for backward compatibility
+# ---------------------------------------------------------------------------
 
 @app.get("/v1/models")
 async def router_list_models():
@@ -1138,7 +1231,9 @@ async def router_list_models():
     for name, eps in routes.items():
         api_eps = [e for e in eps if e.get("type", "api") == "api"]
         if api_eps:
+            cat = api_eps[0].get("category", "text")
             data.append({"id": name, "object": "model", "owned_by": "vllm",
+                         "category": cat,
                          "endpoints": [f"{e['host']}:{e['port']}" for e in api_eps]})
     return {"object": "list", "data": data}
 
@@ -1197,11 +1292,34 @@ async def router_images_generations(request: Request):
     return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/images/generations", body)
 
 
-@app.api_route("/ui/{model}", methods=["GET", "POST", "PUT", "DELETE"])
+@app.get("/ui/{model}")
+async def router_ui_redirect(model: str):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=f"/ui/{model}/", status_code=308)
+
+
 @app.api_route("/ui/{model}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def router_ui_proxy(model: str, request: Request, path: str = ""):
-    """Generic proxy for model web UIs and arbitrary endpoints."""
     ep = _get_model_endpoint(model, kind="website")
+    return await _proxy_path(ep, request, path)
+
+
+@app.post("/v1/audio/transcriptions")
+async def router_audio_transcriptions(request: Request):
+    form = await request.form()
+    model = form.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(str(model))
+    return await _forward_multipart(ep, form)
+
+
+# ---------------------------------------------------------------------------
+# Proxy helpers
+# ---------------------------------------------------------------------------
+
+async def _proxy_path(ep: dict, request: Request, path: str):
+    """Forward an arbitrary request path to the endpoint."""
     target_path = f"/{path}" if path else "/"
     if request.url.query:
         target_path += f"?{request.url.query}"
@@ -1217,15 +1335,9 @@ async def router_ui_proxy(model: str, request: Request, path: str = ""):
         )
 
 
-@app.post("/v1/audio/transcriptions")
-async def router_audio_transcriptions(request: Request):
-    form = await request.form()
-    model = form.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(str(model))
+async def _forward_multipart(ep: dict, form):
+    """Forward multipart form data (audio transcriptions etc.)."""
     url = f"http://{ep['host']}:{ep['port']}/v1/audio/transcriptions"
-    # Forward multipart form data
     files = {}
     data = {}
     for key, value in form.items():
