@@ -1054,15 +1054,15 @@ async def _update_last_active():
                 except Exception:
                     restart_count = 0
                 if restart_count >= 3:
-                    log_cmd = f"docker logs --tail 50 {container} 2>&1"
+                    log_cmd = f"docker logs --tail 300 {container} 2>&1"
                     try:
                         log_res = await _agent_request(m, "POST", "/execute", json_body={"command": log_cmd, "timeout": 10})
                         logs = log_res.get("stdout", "") + log_res.get("stderr", "")
                         for pattern in _FATAL_LOG_PATTERNS:
                             if pattern in logs:
                                 await _agent_request(m, "POST", "/execute",
-                                    json_body={"command": f"docker rm -f {container}", "timeout": 30})
-                                print(f"[crash-stop] {machine_name}:{container} removed — {pattern}")
+                                    json_body={"command": f"docker stop {container}", "timeout": 30})
+                                print(f"[crash-stop] {machine_name}:{container} stopped — {pattern}")
                                 break
                     except Exception:
                         pass
