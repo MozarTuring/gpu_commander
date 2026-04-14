@@ -204,6 +204,7 @@ _FATAL_LOG_PATTERNS = [
     "unrecognized arguments",
     "ModuleNotFoundError",
     "ImportError",
+    "AttributeError",
 ]
 
 
