@@ -695,7 +695,10 @@ async function loadDeployTasks() {
                     <td>${portsCell}</td>
                     <td style="font-size:12px; color:var(--text-dim)">${escapeHtml(t.username || '')}</td>
                     <td style="font-size:12px; color:var(--text-dim)">${age}m ago</td>
-                    <td>${canCancel ? `<button class="cancel-btn" onclick="cancelDeployTask('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}')">Cancel</button>` : ''}</td>
+                    <td>
+                        <button class="cancel-btn" onclick="openLogModal('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}','${escapeHtml(t.model)}')">Logs</button>
+                        ${canCancel ? `<button class="cancel-btn" onclick="cancelDeployTask('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}')">Cancel</button>` : ''}
+                    </td>
                 </tr>`;
             }).join('')}</tbody>
         </table>`;
@@ -711,6 +714,45 @@ async function cancelDeployTask(machine, taskId) {
         loadDeployTasks();
     } catch (e) {
         alert('Failed to cancel: ' + e.message);
+    }
+}
+
+let _logPollTimer = null;
+
+function openLogModal(machine, taskId, model) {
+    const modal = document.getElementById('log-modal');
+    const title = document.getElementById('log-modal-title');
+    const body = document.getElementById('log-modal-body');
+    title.textContent = `Logs: ${model} (${taskId})`;
+    body.textContent = 'Loading...';
+    modal.style.display = '';
+    pollTaskLogs(machine, taskId);
+}
+
+function closeLogModal() {
+    document.getElementById('log-modal').style.display = 'none';
+    if (_logPollTimer) { clearTimeout(_logPollTimer); _logPollTimer = null; }
+}
+
+async function pollTaskLogs(machine, taskId) {
+    if (_logPollTimer) { clearTimeout(_logPollTimer); _logPollTimer = null; }
+    const modal = document.getElementById('log-modal');
+    if (modal.style.display === 'none') return;
+    const body = document.getElementById('log-modal-body');
+    try {
+        const task = await api(`/api/machines/${machine}/tasks/${taskId}`);
+        let log = '';
+        if (task.stdout) log += task.stdout;
+        if (task.stderr) log += task.stderr;
+        if (!log) log = task.status === 'running' ? 'Waiting for output...' : '(no output)';
+        const wasAtBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 20;
+        body.textContent = log;
+        if (wasAtBottom) body.scrollTop = body.scrollHeight;
+        if (task.status === 'running' || task.status === 'queued') {
+            _logPollTimer = setTimeout(() => pollTaskLogs(machine, taskId), 2000);
+        }
+    } catch (e) {
+        body.textContent = 'Failed to load logs: ' + e.message;
     }
 }
 

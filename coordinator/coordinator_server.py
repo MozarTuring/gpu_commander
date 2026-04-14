@@ -202,6 +202,8 @@ _FATAL_LOG_PATTERNS = [
     "EntryNotFoundError",
     "OSError: You are trying to access a gated repo",
     "unrecognized arguments",
+    "ModuleNotFoundError",
+    "ImportError",
 ]
 
 
@@ -993,9 +995,22 @@ async def _update_last_active():
     for machine_name, m in cfg.machines.items():
         if not m.vllm_service_dir or not _machine_online.get(machine_name):
             continue
-        known = {r["container"] for r in _deploy_records if r["machine"] == machine_name}
+        machine_records = [r for r in _deploy_records if r["machine"] == machine_name]
+        known = {r["container"] for r in machine_records}
         if not known:
             continue
+
+        # Build set of containers whose deploy task is still in progress
+        still_deploying: set[str] = set()
+        try:
+            all_tasks = await _agent_request(m, "GET", "/tasks", params={"limit": 200}, timeout=10)
+            active_task_ids = {t["id"] for t in all_tasks if t.get("status") in ("queued", "running")}
+            for r in machine_records:
+                if r["task_id"] in active_task_ids:
+                    still_deploying.add(r["container"])
+        except Exception:
+            pass
+
         list_cmd = "docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true"
         try:
             res = await _agent_request(m, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
@@ -1024,6 +1039,8 @@ async def _update_last_active():
                 count = 0
             if container in not_yet_healthy:
                 _container_last_active.pop(key, None)
+                if container in still_deploying:
+                    continue
                 restart_cmd = f"docker inspect --format='{{{{.RestartCount}}}}' {container} 2>/dev/null || echo 0"
                 try:
                     rc_res = await _agent_request(m, "POST", "/execute", json_body={"command": restart_cmd, "timeout": 10})

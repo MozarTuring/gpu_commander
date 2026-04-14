@@ -159,9 +159,18 @@ class TaskQueue:
         self, task: Task, proc: asyncio.subprocess.Process
     ) -> None:
         try:
-            stdout, stderr = await proc.communicate()
-            task.stdout = stdout.decode(errors="replace")
-            task.stderr = stderr.decode(errors="replace")
+            async def _read_stream(stream, attr):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    setattr(task, attr, getattr(task, attr) + line.decode(errors="replace"))
+
+            await asyncio.gather(
+                _read_stream(proc.stdout, "stdout"),
+                _read_stream(proc.stderr, "stderr"),
+            )
+            await proc.wait()
             task.exit_code = proc.returncode
             task.status = (
                 TaskStatus.COMPLETED if proc.returncode == 0 else TaskStatus.FAILED
