@@ -614,16 +614,19 @@ def _read_llm_models(vllm_dir: str) -> list[dict]:
                 else:
                     hf_model = str(svc.get("image", ""))
             except Exception:
-                pass
+                compose = {}
+                svc = {}
+            svc_name = next(iter((compose.get("services") or {}).keys()), category)
+            cname = svc.get("container_name", f"{dir_name}-{svc_name}-1")
             models.append({
                 "name": dir_name,
                 "model": hf_model,
                 "memory_utilization": mem_util,
                 "type": model_type,
                 "category": category,
-                "container_name": dir_name,
+                "container_name": cname,
                 "compose_dir": f"{category}/{dir_name}",
-                "compose_service": "",
+                "compose_service": svc_name,
             })
     return models
 
