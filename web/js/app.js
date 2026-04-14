@@ -696,7 +696,7 @@ async function loadDeployTasks() {
                     <td style="font-size:12px; color:var(--text-dim)">${escapeHtml(t.username || '')}</td>
                     <td style="font-size:12px; color:var(--text-dim)">${age}m ago</td>
                     <td>
-                        <button class="cancel-btn" onclick="openLogModal('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}','${escapeHtml(t.model)}')">Logs</button>
+                        <button class="cancel-btn" onclick="openLogModal('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}','${escapeHtml(t.model)}','${escapeHtml(t.container || '')}')">Logs</button>
                         ${canCancel ? `<button class="cancel-btn" onclick="cancelDeployTask('${escapeHtml(t.machine)}','${escapeHtml(t.task_id)}')">Cancel</button>` : ''}
                     </td>
                 </tr>`;
@@ -718,42 +718,62 @@ async function cancelDeployTask(machine, taskId) {
 }
 
 let _logPollTimer = null;
+let _logPollCtx = null;
 
-function openLogModal(machine, taskId, model) {
+function openLogModal(machine, taskId, model, container) {
     const modal = document.getElementById('log-modal');
     const title = document.getElementById('log-modal-title');
     const body = document.getElementById('log-modal-body');
-    title.textContent = `Logs: ${model} (${taskId})`;
+    title.textContent = `Logs: ${model}`;
     body.textContent = 'Loading...';
     modal.style.display = '';
-    pollTaskLogs(machine, taskId);
+    _logPollCtx = { machine, taskId, container };
+    pollCombinedLogs();
 }
 
 function closeLogModal() {
     document.getElementById('log-modal').style.display = 'none';
+    _logPollCtx = null;
     if (_logPollTimer) { clearTimeout(_logPollTimer); _logPollTimer = null; }
 }
 
-async function pollTaskLogs(machine, taskId) {
+async function pollCombinedLogs() {
     if (_logPollTimer) { clearTimeout(_logPollTimer); _logPollTimer = null; }
     const modal = document.getElementById('log-modal');
-    if (modal.style.display === 'none') return;
+    if (modal.style.display === 'none' || !_logPollCtx) return;
+    const { machine, taskId, container } = _logPollCtx;
     const body = document.getElementById('log-modal-body');
+
+    let taskLog = '', taskDone = true, containerLog = '';
     try {
         const task = await api(`/api/machines/${machine}/tasks/${taskId}`);
-        let log = '';
-        if (task.stdout) log += task.stdout;
-        if (task.stderr) log += task.stderr;
-        if (!log) log = task.status === 'running' ? 'Waiting for output...' : '(no output)';
-        const wasAtBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 20;
-        body.textContent = log;
-        if (wasAtBottom) body.scrollTop = body.scrollHeight;
-        if (task.status === 'running' || task.status === 'queued') {
-            _logPollTimer = setTimeout(() => pollTaskLogs(machine, taskId), 2000);
-        }
-    } catch (e) {
-        body.textContent = 'Failed to load logs: ' + e.message;
+        if (task.stdout) taskLog += task.stdout;
+        if (task.stderr) taskLog += task.stderr;
+        taskDone = task.status !== 'running' && task.status !== 'queued';
+    } catch (_) {}
+
+    if (container) {
+        try {
+            const cres = await api(`/api/machines/${machine}/container-logs/${encodeURIComponent(container)}`);
+            containerLog = cres.logs || '';
+        } catch (_) {}
     }
+
+    let combined = '';
+    if (taskLog) {
+        combined += '═══ Deploy Task Output ═══\n' + taskLog;
+    }
+    if (containerLog) {
+        if (combined) combined += '\n\n';
+        combined += '═══ Container Logs (' + container + ') ═══\n' + containerLog;
+    }
+    if (!combined) combined = taskDone ? '(no output)' : 'Waiting for output...';
+
+    const wasAtBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 20;
+    body.textContent = combined;
+    if (wasAtBottom) body.scrollTop = body.scrollHeight;
+
+    _logPollTimer = setTimeout(pollCombinedLogs, taskDone ? 5000 : 2000);
 }
 
 // ---------------------------------------------------------------------------

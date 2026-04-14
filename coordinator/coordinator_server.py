@@ -520,6 +520,15 @@ async def cancel_task(name: str, task_id: str):
     return await _agent_request(m, "DELETE", f"/tasks/{task_id}")
 
 
+@app.get("/api/machines/{name}/container-logs/{container}")
+async def get_container_logs(name: str, container: str, tail: int = 200):
+    m = _get_machine(name)
+    safe = container.replace("'", "")
+    cmd = f"docker logs --tail {tail} '{safe}' 2>&1"
+    res = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 15})
+    return {"logs": res.get("stdout", "") + res.get("stderr", "")}
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -628,7 +637,6 @@ def _read_llm_models(vllm_dir: str) -> list[dict]:
                 "category": category,
                 "container_name": cname,
                 "compose_dir": f"{category}/{dir_name}",
-                "compose_service": svc_name,
             })
     return models
 
@@ -857,13 +865,11 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
                 wait_loop = ""
 
         compose_dir = model_cfg.get("compose_dir", req.model) if model_cfg else req.model
-        compose_service = model_cfg.get("compose_service", "") if model_cfg else ""
         force_build_export = 'export FORCE_BUILD=1 && ' if req.force_build else ''
         exports = (
             f'{force_build_export}'
             f'export VLLM_SERVED_MODEL_NAME="{req.model}" && '
             f'export MODEL_DIR="{compose_dir}" && '
-            f'export COMPOSE_SERVICE="{compose_service}" && '
             f'export VLLM_WHICH_GPU={which_gpu} && '
             f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
             f'export HF_TOKEN="{effective_hf}"'
@@ -893,7 +899,6 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             "which_gpu": which_gpu,
             "hf_token": effective_hf,
             "compose_dir": compose_dir,
-            "compose_service": compose_service,
             "vllm_service_dir": vd,
         })
         _save_deploy_records()
