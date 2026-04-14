@@ -744,7 +744,7 @@ async function pollCombinedLogs() {
     const { machine, taskId, container } = _logPollCtx;
     const body = document.getElementById('log-modal-body');
 
-    let taskLog = '', taskDone = true, containerLog = '';
+    let taskLog = '', taskDone = true;
     try {
         const task = await api(`/api/machines/${machine}/tasks/${taskId}`);
         if (task.stdout) taskLog += task.stdout;
@@ -752,25 +752,10 @@ async function pollCombinedLogs() {
         taskDone = task.status !== 'running' && task.status !== 'queued';
     } catch (_) {}
 
-    if (container) {
-        try {
-            const cres = await api(`/api/machines/${machine}/container-logs/${encodeURIComponent(container)}`);
-            containerLog = cres.logs || '';
-        } catch (_) {}
-    }
-
-    let combined = '';
-    if (taskLog) {
-        combined += '═══ Deploy Task Output ═══\n' + taskLog;
-    }
-    if (containerLog) {
-        if (combined) combined += '\n\n';
-        combined += '═══ Container Logs (' + container + ') ═══\n' + containerLog;
-    }
-    if (!combined) combined = taskDone ? '(no output)' : 'Waiting for output...';
+    if (!taskLog) taskLog = taskDone ? '(no output)' : 'Waiting for output...';
 
     const wasAtBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 20;
-    body.textContent = combined;
+    body.textContent = taskLog;
     if (wasAtBottom) body.scrollTop = body.scrollHeight;
 
     _logPollTimer = setTimeout(pollCombinedLogs, taskDone ? 5000 : 2000);
