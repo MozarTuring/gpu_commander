@@ -189,6 +189,21 @@ def _save_deploy_records() -> None:
 
 _deploy_records: list[dict] = _load_deploy_records()
 
+_FATAL_LOG_PATTERNS = [
+    "is less than desired GPU memory utilization",
+    "No supported CUDA architectures found",
+    "CUDA out of memory",
+    "CUDA error",
+    "RuntimeError: CUDA",
+    "torch.OutOfMemoryError",
+    "Address already in use",
+    "model does not appear to have a file named",
+    "does not appear to have a file named config.json",
+    "EntryNotFoundError",
+    "OSError: You are trying to access a gated repo",
+    "unrecognized arguments",
+]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -927,7 +942,7 @@ async def _check_idle_containers():
                 cname = parts[0].strip()
                 status = parts[1].strip() if len(parts) > 1 else ""
                 running.add(cname)
-                if "health: starting" in status or "health: unhealthy" in status:
+                if "health: starting" in status or "health: unhealthy" in status or "Restarting" in status:
                     not_yet_healthy.add(cname)
             containers = known & running
         except Exception:
@@ -990,7 +1005,7 @@ async def _update_last_active():
                 cname = parts[0].strip()
                 status = parts[1].strip() if len(parts) > 1 else ""
                 running.add(cname)
-                if "health: starting" in status or "health: unhealthy" in status:
+                if "health: starting" in status or "health: unhealthy" in status or "Restarting" in status:
                     not_yet_healthy.add(cname)
             containers = known & running
         except Exception:
@@ -1006,15 +1021,25 @@ async def _update_last_active():
                 count = 0
             if container in not_yet_healthy:
                 _container_last_active.pop(key, None)
-                # Stop crash-looping containers that failed due to insufficient GPU memory
-                oom_cmd = f"docker logs --tail 30 {container} 2>&1 | grep -c 'is less than desired GPU memory utilization' || echo 0"
+                restart_cmd = f"docker inspect --format='{{{{.RestartCount}}}}' {container} 2>/dev/null || echo 0"
                 try:
-                    oom_res = await _agent_request(m, "POST", "/execute", json_body={"command": oom_cmd, "timeout": 10})
-                    if int(oom_res.get("stdout", "0").strip()) > 0:
-                        await _agent_request(m, "POST", "/execute", json_body={"command": f"docker rm -f {container}", "timeout": 30})
-                        print(f"[oom-stop] {machine_name}:{container} removed — insufficient GPU memory")
+                    rc_res = await _agent_request(m, "POST", "/execute", json_body={"command": restart_cmd, "timeout": 10})
+                    restart_count = int(rc_res.get("stdout", "0").strip())
                 except Exception:
-                    pass
+                    restart_count = 0
+                if restart_count >= 3:
+                    log_cmd = f"docker logs --tail 50 {container} 2>&1"
+                    try:
+                        log_res = await _agent_request(m, "POST", "/execute", json_body={"command": log_cmd, "timeout": 10})
+                        logs = log_res.get("stdout", "") + log_res.get("stderr", "")
+                        for pattern in _FATAL_LOG_PATTERNS:
+                            if pattern in logs:
+                                await _agent_request(m, "POST", "/execute",
+                                    json_body={"command": f"docker rm -f {container}", "timeout": 30})
+                                print(f"[crash-stop] {machine_name}:{container} removed — {pattern}")
+                                break
+                    except Exception:
+                        pass
                 continue
             if key not in _container_last_active or count > 0:
                 _container_last_active[key] = now
