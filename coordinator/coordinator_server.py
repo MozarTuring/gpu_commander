@@ -125,7 +125,7 @@ _bootstrap_admin()
 
 # Paths that don't need authentication
 _UNPROTECTED = {"/", "/api/auth/login", "/api/version"}
-_UNPROTECTED_PREFIXES = ("/v1/", "/text/", "/audio/", "/static/", "/api/router/", "/ui/")
+_UNPROTECTED_PREFIXES = ("/text/", "/audio/", "/tts/", "/ui/", "/static/", "/api/router/")
 
 def _check_request_auth(request: Request) -> dict | None:
     """Return user dict if authenticated, else None."""
@@ -1152,7 +1152,7 @@ def _get_model_endpoint(model_name: str, kind: str = "api", category: str | None
 # Category-prefixed routes: /{category}/v1/...
 # ---------------------------------------------------------------------------
 
-_VALID_CATEGORIES = ("text", "audio", "ui")
+_VALID_CATEGORIES = ("text", "audio", "tts", "ui")
 
 
 @app.get("/{category}/v1/models")
@@ -1220,77 +1220,27 @@ async def router_cat_audio_transcriptions(category: str, request: Request):
     return await _forward_multipart(ep, form)
 
 
+@app.post("/{category}/v1/audio/speech")
+async def router_cat_audio_speech(category: str, request: Request):
+    body = await request.json()
+    model = body.get("model")
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    ep = _get_model_endpoint(model, category=category)
+    url = f"http://{ep['host']}:{ep['port']}/v1/audio/speech"
+    async with httpx.AsyncClient(timeout=300) as client:
+        resp = await client.post(url, json=body)
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            headers={k: v for k, v in resp.headers.items()
+                     if k.lower() not in ("transfer-encoding", "content-encoding", "content-length")},
+        )
+
+
 # ---------------------------------------------------------------------------
-# Legacy routes (no category prefix) — kept for backward compatibility
+# UI proxy: /ui/{model}/...
 # ---------------------------------------------------------------------------
-
-@app.get("/v1/models")
-async def router_list_models():
-    routes = _load_routes()
-    data = []
-    for name, eps in routes.items():
-        api_eps = [e for e in eps if e.get("type", "api") == "api"]
-        if api_eps:
-            cat = api_eps[0].get("category", "text")
-            data.append({"id": name, "object": "model", "owned_by": "vllm",
-                         "category": cat,
-                         "endpoints": [f"{e['host']}:{e['port']}" for e in api_eps]})
-    return {"object": "list", "data": data}
-
-
-@app.get("/ui/")
-async def router_list_websites():
-    routes = _load_routes()
-    sites = []
-    for name, eps in routes.items():
-        web_eps = [e for e in eps if e.get("type", "api") == "website"]
-        if web_eps:
-            sites.append({"id": name, "url": f"/ui/{name}/"})
-    html = "<html><body><h2>Available UIs</h2><ul>" + "".join(
-        f'<li><a href="{s["url"]}">{s["id"]}</a></li>' for s in sites
-    ) + "</ul></body></html>"
-    return Response(content=html, media_type="text/html")
-
-
-@app.post("/v1/chat/completions")
-async def router_chat_completions(request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model)
-    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/chat/completions", body, stream=body.get("stream", False))
-
-
-@app.post("/v1/completions")
-async def router_completions(request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model)
-    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/completions", body, stream=body.get("stream", False))
-
-
-@app.post("/v1/embeddings")
-async def router_embeddings(request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model)
-    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/embeddings", body)
-
-
-@app.post("/v1/images/generations")
-async def router_images_generations(request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model)
-    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/images/generations", body)
-
 
 @app.get("/ui/{model}")
 async def router_ui_redirect(model: str):
@@ -1300,18 +1250,8 @@ async def router_ui_redirect(model: str):
 
 @app.api_route("/ui/{model}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def router_ui_proxy(model: str, request: Request, path: str = ""):
-    ep = _get_model_endpoint(model, kind="website")
+    ep = _get_model_endpoint(model, kind="website", category="ui")
     return await _proxy_path(ep, request, path)
-
-
-@app.post("/v1/audio/transcriptions")
-async def router_audio_transcriptions(request: Request):
-    form = await request.form()
-    model = form.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(str(model))
-    return await _forward_multipart(ep, form)
 
 
 # ---------------------------------------------------------------------------
