@@ -25,20 +25,22 @@ fi
 
 # --- after hook (runs locally after remote job launches) ---
 if [[ "$1" == "after" ]]; then
-    _vllm_branch=$(git -C vllm_service rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
-    _branch_suffix="${_remote_proj##*_}"
-    if [[ "$_branch_suffix" == "main" ]]; then
-        _config_file="gpu_commander/config.yaml"
-    elif [[ -f "gpu_commander/config.${_branch_suffix}.yaml" ]]; then
-        _config_file="gpu_commander/config.${_branch_suffix}.yaml"
-    else
-        _config_file="gpu_commander/config.yaml"
-    fi
+    # _vllm_branch=$(git -C vllm_service rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+    # _branch_suffix="${_remote_proj##*_}"
+    # if [[ "$_branch_suffix" == "main" ]]; then
+    #     _config_file="gpu_commander/config.yaml"
+    # elif [[ -f "gpu_commander/config.${_branch_suffix}.yaml" ]]; then
+    #     _config_file="gpu_commander/config.${_branch_suffix}.yaml"
+    # else
+    #     _config_file="gpu_commander/config.yaml"
+    # fi
+    #
+    # echo "Syncing vllm_service to $2 (vllm_service_${_vllm_branch})..."
+    # rsync -av --exclude-from='common_tools/rsync_exclude.txt' \
+    #     vllm_service/ "$2":${run_dir_pre}/vllm_service_${_vllm_branch}/
+    #
 
-    echo "Syncing vllm_service to $2 (vllm_service_${_vllm_branch})..."
-    rsync -av --exclude-from='common_tools/rsync_exclude.txt' \
-        vllm_service/ "$2":${run_dir_pre}/vllm_service_${_vllm_branch}/
-
+    last_commit=$(sync_and_commit_repo vllm_service)
     if [[ "$2" == "ferragon" ]]; then
         _coord_port=$(python3 -c "import yaml; cfg=yaml.safe_load(open('${_config_file}')); print(cfg['coordinator']['port'])")
 

@@ -1119,9 +1119,7 @@ async def register_route(request: Request):
     route_type = body.get("type", "api")  # "api", "website", or "both"
     category = body.get("category", "text")
     routes = _read_routes_file()
-    routes.setdefault(model, [])
-    routes[model] = [e for e in routes[model] if e["machine"] != machine]
-    routes[model].append({"machine": machine, "port": port, "type": route_type, "category": category})
+    routes[model] = [{"machine": machine, "port": port, "type": route_type, "category": category}]
     _save_routes_file(routes)
     global _routes_mtime
     _routes_mtime = 0

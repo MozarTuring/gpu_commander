@@ -124,9 +124,8 @@ echo "Coordinator started — PID: $!"
 wait_for_startup "Coordinator" "${PROJ_DIR}/coordinator.log" || { return 1 2>/dev/null; exit 1; }
 
 if false; then
-    cd /Users/maojingwei/baidu/project/ && source common_tools/meta_script.sh ferragon gpu_commander remote_
+    cd /Users/maojingwei/baidu/project/ && source common_tools/meta_script.sh custodian@ferragon gpu_commander remote_
 
     _coord_port=9800 && ssh -o ControlPath=none -f -N -L ${_coord_port}:localhost:${_coord_port} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes ferragon
-    curl -s http://localhost:9800/text/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"llama-4-scout-17b-16e","messages":[{"role":"user","content":"Say hello in Swedish, one sentence only."}]}'
-    curl -s http://localhost:9800/text/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"qwen3-coder-next-fp8","messages":[{"role":"user","content":"Say hello in Swedish, one sentence only."}]}'
+    # _coord_port=9800 && ssh -o ControlPath=none -f -N -L ${_coord_port}:localhost:${_coord_port} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes <stellar_account>@ferragon.stellar.research.liu.se
 fi
