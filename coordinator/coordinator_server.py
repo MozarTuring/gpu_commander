@@ -125,7 +125,8 @@ _bootstrap_admin()
 
 # Paths that don't need authentication
 _UNPROTECTED = {"/", "/api/auth/login", "/api/version"}
-_UNPROTECTED_PREFIXES = ("/text/", "/audio/", "/tts/", "/ui/", "/static/", "/api/router/")
+_VALID_CATEGORIES = ("text", "audio", "tts", "ui", "ominithinker")
+_UNPROTECTED_PREFIXES = tuple(f"/{c}/" for c in _VALID_CATEGORIES) + ("/static/", "/api/router/")
 
 def _check_request_auth(request: Request) -> dict | None:
     """Return user dict if authenticated, else None."""
@@ -1118,6 +1119,8 @@ async def register_route(request: Request):
     model, machine, port = body["model"], body["machine"], body["port"]
     route_type = body.get("type", "api")  # "api", "website", or "both"
     category = body.get("category", "text")
+    if category not in _VALID_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Unsupported category '{category}'. Valid: {', '.join(sorted(_VALID_CATEGORIES))}")
     routes = _read_routes_file()
     routes[model] = [{"machine": machine, "port": port, "type": route_type, "category": category}]
     _save_routes_file(routes)
@@ -1201,89 +1204,31 @@ def _get_model_endpoint(model_name: str, kind: str = "api", category: str | None
 # Category-prefixed routes: /{category}/v1/...
 # ---------------------------------------------------------------------------
 
-_VALID_CATEGORIES = ("text", "audio", "tts", "ui")
-
-
-@app.get("/{category}/v1/models")
-async def router_list_models_by_category(category: str):
+@app.get("/{category}/{model_name}")
+async def router_model_root(category: str, model_name: str):
     if category not in _VALID_CATEGORIES:
         raise HTTPException(status_code=404, detail=f"Unknown category '{category}'")
-    routes = _load_routes()
-    data = []
-    for name, eps in routes.items():
-        cat_eps = [e for e in eps if e.get("category", "text") == category]
-        if cat_eps:
-            data.append({"id": name, "object": "model", "owned_by": "vllm",
-                         "category": category,
-                         "endpoints": [f"{e['host']}:{e['port']}" for e in cat_eps]})
-    return {"object": "list", "data": data}
+    ep = _get_model_endpoint(model_name, category=category)
+    return {"model": model_name, "category": category, "endpoint": f"{ep['host']}:{ep['port']}"}
 
 
-@app.post("/{category}/v1/chat/completions")
-async def router_cat_chat_completions(category: str, request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model, category=category)
-    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/chat/completions", body, stream=body.get("stream", False))
-
-
-@app.post("/{category}/v1/completions")
-async def router_cat_completions(category: str, request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model, category=category)
-    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/completions", body, stream=body.get("stream", False))
-
-
-@app.post("/{category}/v1/embeddings")
-async def router_cat_embeddings(category: str, request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model, category=category)
-    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/embeddings", body)
-
-
-@app.post("/{category}/v1/images/generations")
-async def router_cat_images_generations(category: str, request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model, category=category)
-    return await _proxy_request(f"http://{ep['host']}:{ep['port']}/v1/images/generations", body)
-
-
-@app.post("/{category}/v1/audio/transcriptions")
-async def router_cat_audio_transcriptions(category: str, request: Request):
-    form = await request.form()
-    model = form.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(str(model), category=category)
-    return await _forward_multipart(ep, form)
-
-
-@app.post("/{category}/v1/audio/speech")
-async def router_cat_audio_speech(category: str, request: Request):
-    body = await request.json()
-    model = body.get("model")
-    if not model:
-        raise HTTPException(status_code=400, detail="Missing 'model' field")
-    ep = _get_model_endpoint(model, category=category)
-    url = f"http://{ep['host']}:{ep['port']}/v1/audio/speech"
-    async with httpx.AsyncClient(timeout=300) as client:
-        resp = await client.post(url, json=body)
+@app.api_route("/{category}/{model_name}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def router_cat_proxy(category: str, model_name: str, path: str, request: Request):
+    if category not in _VALID_CATEGORIES:
+        raise HTTPException(status_code=404, detail=f"Unknown category '{category}'")
+    ep = _get_model_endpoint(model_name, category=category)
+    target = f"http://{ep['host']}:{ep['port']}/{path}"
+    if request.url.query:
+        target += f"?{request.url.query}"
+    body = await request.body()
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+    async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
+        resp = await client.request(request.method, target, content=body, headers=headers)
+        excluded = {"transfer-encoding", "content-encoding", "content-length"}
         return Response(
             content=resp.content,
             status_code=resp.status_code,
-            headers={k: v for k, v in resp.headers.items()
-                     if k.lower() not in ("transfer-encoding", "content-encoding", "content-length")},
+            headers={k: v for k, v in resp.headers.items() if k.lower() not in excluded},
         )
 
 
