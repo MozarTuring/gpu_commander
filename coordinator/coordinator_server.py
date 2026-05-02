@@ -78,6 +78,11 @@ def _jwt_verify(token: str) -> dict | None:
         payload = json.loads(_b64url_decode(body))
         if payload.get('exp', 0) < time.time():
             return None
+        username = payload.get('username')
+        if username and username != '_agent':
+            user = _load_users().get(username)
+            if not user or user.get('salt') != payload.get('salt'):
+                return None
         return payload
     except Exception:
         return None
@@ -272,6 +277,7 @@ async def login(req: LoginRequest):
     token = _jwt_create({
         "username": req.username,
         "role": user["role"],
+        "salt": user["salt"],
         "iat": int(time.time()),
         "exp": int(time.time()) + _SESSION_TTL,
     })
