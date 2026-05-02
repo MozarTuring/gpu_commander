@@ -40,4 +40,4 @@ machines:
     ssh_alias: balawar
     remote_dir: /home/jinma/project_remote_jwm/gpu_commander/agent
     description: "balawar.stellar.research.liu.se"
-    vllm_service_dir: /home/jinma/project_remote_jwm/vllm_service_jingwei
+    vllm_service_dir: /home/custodian/project_remote_jwm/vllm_service_jingwei
