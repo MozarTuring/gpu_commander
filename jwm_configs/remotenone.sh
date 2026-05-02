@@ -125,6 +125,5 @@ wait_for_startup "Coordinator" "${PROJ_DIR}/coordinator.log" || { return 1 2>/de
 
 if false; then
     _coord_port=9800 && ssh -o ControlPath=none -f -N -L ${_coord_port}:localhost:${_coord_port} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes ferragon
-    # _coord_port=9800 && ssh -o ControlPath=none -f -N -L ${_coord_port}:localhost:${_coord_port} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes <stellar_account>@ferragon.stellar.research.liu.se
 fi
-# custodian@ferragon
+# ferragon
