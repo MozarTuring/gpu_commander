@@ -57,10 +57,15 @@ print(cfg.get('auth', {}).get('token', 'gpu-commander-secret-change-me'))
 echo "Agent dir:  ${AGENT_DIR}"
 echo "Agent port: ${AGENT_PORT}"
 
-# Kill coordinator first so it can't submit stale tasks to the new agent
-pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || true
-# Kill old agent
-pkill -f 'uvicorn.*agent_server' 2>/dev/null || true
+# Kill old processes (fail if they exist but can't be killed, e.g. owned by another user)
+_coord_pids=$(pgrep -f 'uvicorn.*coordinator_server' 2>/dev/null || true)
+_agent_pids=$(pgrep -f 'uvicorn.*agent_server' 2>/dev/null || true)
+if [[ -n "$_coord_pids" ]]; then
+    pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || { echo "ERROR: cannot kill coordinator (PIDs: $_coord_pids) — owned by another user?"; return 1 2>/dev/null; exit 1; }
+fi
+if [[ -n "$_agent_pids" ]]; then
+    pkill -f 'uvicorn.*agent_server' 2>/dev/null || { echo "ERROR: cannot kill agent (PIDs: $_agent_pids) — owned by another user?"; return 1 2>/dev/null; exit 1; }
+fi
 sleep 1
 
 # Wait for a uvicorn service to start by watching its log.
@@ -84,10 +89,11 @@ wait_for_startup() {
 
 # Start agent using the venv python
 cd "${AGENT_DIR}"
+>agent.log
 GPU_COMMANDER_TOKEN="${AUTH_TOKEN}" \
     GPU_COMMANDER_AGENT_PORT="${AGENT_PORT}" \
     nohup "${VENV_DIR}/bin/python3" -m uvicorn agent_server:app --host 0.0.0.0 --port "${AGENT_PORT}" \
-    >agent.log 2>&1 &
+    >>agent.log 2>&1 &
 AGENT_PID=$!
 echo "Agent started — PID: ${AGENT_PID}"
 
@@ -116,9 +122,10 @@ print(cfg.get('coordinator', {}).get('port', 9800))
 echo "Coordinator port: ${COORDINATOR_PORT}"
 
 cd "${PROJ_DIR}/coordinator"
+>"${PROJ_DIR}/coordinator.log"
 GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
     nohup "${VENV_DIR}/bin/python3" -m uvicorn coordinator_server:app --host 0.0.0.0 --port "${COORDINATOR_PORT}" \
-    >"${PROJ_DIR}/coordinator.log" 2>&1 &
+    >>"${PROJ_DIR}/coordinator.log" 2>&1 &
 echo "Coordinator started — PID: $!"
 
 wait_for_startup "Coordinator" "${PROJ_DIR}/coordinator.log" || { return 1 2>/dev/null; exit 1; }

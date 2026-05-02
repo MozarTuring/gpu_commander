@@ -19,25 +19,13 @@ auth:
 
 machines:
   ferragon:
-    host: localhost             # coordinator co-located with this agent
+    host: ferragon.stellar.research.liu.se              # coordinator co-located with this agent
     agent_port: 9850
-    ssh_alias: ferragon
-    remote_dir: /home/custodian/project_remote_jwm/gpu_commander/agent
-    description: "ferragon.stellar.research.liu.se"
-    vllm_service_dir: /home/jinma/project_remote_jwm/vllm_service_jingwei
 
   greatrawr:
     host: greatrawr.stellar.research.liu.se   # direct hostname from ferragon
     agent_port: 9850
-    ssh_alias: greatrawr
-    remote_dir: /home/custodian/project_remote_jwm/gpu_commander/agent
-    description: "greatrawr.stellar.research.liu.se"
-    vllm_service_dir: /home/jinma/project_remote_jwm/vllm_service_jingwei
 
   balawar:
     host: balawar.stellar.research.liu.se
     agent_port: 9850
-    ssh_alias: balawar
-    remote_dir: /home/jinma/project_remote_jwm/gpu_commander/agent
-    description: "balawar.stellar.research.liu.se"
-    vllm_service_dir: /home/jinma/project_remote_jwm/vllm_service_jingwei
