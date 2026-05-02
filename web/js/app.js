@@ -15,6 +15,7 @@ document.querySelectorAll('.tab').forEach(btn => {
         btn.classList.add('active');
         document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
         if (btn.dataset.tab === 'llm') loadLLMTab();
+        if (btn.dataset.tab === 'services') loadServicesTab();
         if (btn.dataset.tab === 'tasks') loadTasks();
         if (btn.dataset.tab === 'settings') loadSettings();
     });
@@ -135,6 +136,7 @@ function renderMachines(data) {
 
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
     if (activeTab === 'llm') loadLLMTab();
+    if (activeTab === 'services') loadServicesTab();
     if (activeTab === 'tasks') loadTasks();
 }
 
@@ -324,6 +326,7 @@ function startPolling(interval = 10000) {
         const activeTab = document.querySelector('.tab.active')?.dataset.tab;
         if (activeTab === 'tasks') loadTasks();
         if (activeTab === 'llm') loadLLMTab();
+        if (activeTab === 'services') loadServicesTab();
     }, interval);
 }
 
@@ -759,6 +762,88 @@ async function pollCombinedLogs() {
     if (wasAtBottom) body.scrollTop = body.scrollHeight;
 
     _logPollTimer = setTimeout(pollCombinedLogs, taskDone ? 5000 : 2000);
+}
+
+// ---------------------------------------------------------------------------
+// Services tab — registered routes + all containers
+// ---------------------------------------------------------------------------
+async function loadServicesTab() {
+    const grid = document.getElementById('servicesGrid');
+    if (!grid) return;
+
+    try {
+        const [routes, containers] = await Promise.all([
+            api('/api/router/routes'),
+            api('/api/containers/all'),
+        ]);
+
+        grid.innerHTML = '';
+
+        // Registered Routes panel
+        const routesPanel = document.createElement('div');
+        routesPanel.className = 'panel';
+        routesPanel.style.marginBottom = '16px';
+
+        if (routes.length === 0) {
+            routesPanel.innerHTML = `
+                <div class="panel-header"><span class="panel-label">Registered Routes</span></div>
+                <div class="empty-state">No routes registered</div>`;
+        } else {
+            routesPanel.innerHTML = `
+                <div class="panel-header"><span class="panel-label">Registered Routes</span></div>
+                <table class="task-table">
+                    <thead><tr><th>Model</th><th>Category</th><th>Type</th><th>Machine</th><th>Direct</th><th>Proxy Path</th></tr></thead>
+                    <tbody>${routes.map(r => {
+                        const proxyPath = `/${r.category}/${r.model}/v1`;
+                        const direct = `${r.host}:${r.port}`;
+                        return `<tr>
+                            <td style="font-family:var(--mono); font-size:12px">${escapeHtml(r.model)}</td>
+                            <td style="font-size:11px; color:var(--text-dim); text-transform:uppercase">${escapeHtml(r.category)}</td>
+                            <td style="font-size:12px">${escapeHtml(r.type)}</td>
+                            <td>${escapeHtml(displayName(r.machine))}</td>
+                            <td style="font-family:var(--mono); font-size:11px; color:var(--text-mid)">${escapeHtml(direct)}</td>
+                            <td style="font-family:var(--mono); font-size:11px; color:var(--accent)">${escapeHtml(proxyPath)}</td>
+                        </tr>`;
+                    }).join('')}</tbody>
+                </table>`;
+        }
+        grid.appendChild(routesPanel);
+
+        // All Containers panel
+        const containersPanel = document.createElement('div');
+        containersPanel.className = 'panel';
+        let html = `<div class="panel-header"><span class="panel-label">All Containers</span></div>`;
+
+        for (const [machineName, data] of Object.entries(containers)) {
+            const label = escapeHtml(displayName(machineName));
+            if (!data.online) {
+                html += `<div style="margin-bottom:12px">
+                    <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em">${label} <span style="color:var(--red)">(offline)</span></div>
+                </div>`;
+                continue;
+            }
+            const ctrs = data.containers;
+            const rows = ctrs.length === 0
+                ? '<div style="color:var(--text-dim); font-size:13px; margin-bottom:12px">No running containers</div>'
+                : `<table class="task-table" style="margin-bottom:12px"><thead><tr><th>Container</th><th>Image</th><th>Status</th><th>Ports</th></tr></thead><tbody>
+                    ${ctrs.map(c => `<tr>
+                        <td style="font-family:var(--mono); font-size:12px">${escapeHtml(c.name)}</td>
+                        <td style="font-family:var(--mono); font-size:11px; color:var(--text-mid); max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${escapeHtml(c.image)}</td>
+                        <td style="font-size:12px">${escapeHtml(c.status)}</td>
+                        <td style="font-family:var(--mono); font-size:11px">${escapeHtml(c.ports)}</td>
+                    </tr>`).join('')}
+                </tbody></table>`;
+            html += `<div style="margin-bottom:12px">
+                <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em">${label}</div>
+                ${rows}
+            </div>`;
+        }
+
+        containersPanel.innerHTML = html;
+        grid.appendChild(containersPanel);
+    } catch (err) {
+        grid.innerHTML = `<div class="empty-state">Error loading services: ${escapeHtml(err.message)}</div>`;
+    }
 }
 
 // ---------------------------------------------------------------------------

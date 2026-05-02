@@ -1112,6 +1112,52 @@ def _read_routes_file() -> dict:
         return {}
 
 
+@app.get("/api/router/routes")
+async def list_all_routes():
+    """Return all registered model routes with resolved hosts."""
+    routes = _load_routes()
+    result = []
+    for model_name, endpoints in routes.items():
+        for ep in endpoints:
+            result.append({
+                "model": model_name,
+                "machine": ep["machine"],
+                "host": ep["host"],
+                "port": ep["port"],
+                "type": ep.get("type", "api"),
+                "category": ep.get("category", "text"),
+            })
+    return result
+
+
+@app.get("/api/containers/all")
+async def list_all_containers(user: dict = Depends(require_auth)):
+    """Return running docker containers across all machines."""
+    result = {}
+    for name, m in cfg.machines.items():
+        if not _machine_online.get(name):
+            result[name] = {"online": False, "containers": []}
+            continue
+        try:
+            cmd = "docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || true"
+            res = await _agent_request(m, "POST", "/execute", json_body={"command": cmd, "timeout": 10})
+            containers = []
+            for line in res.get("stdout", "").strip().splitlines():
+                parts = line.split("\t")
+                if not parts[0].strip():
+                    continue
+                containers.append({
+                    "name": parts[0] if len(parts) > 0 else "",
+                    "image": parts[1] if len(parts) > 1 else "",
+                    "status": parts[2] if len(parts) > 2 else "",
+                    "ports": parts[3] if len(parts) > 3 else "",
+                })
+            result[name] = {"online": True, "containers": containers}
+        except Exception:
+            result[name] = {"online": False, "containers": []}
+    return result
+
+
 @app.post("/api/router/register")
 async def register_route(request: Request):
     """Called by meta_script after container becomes healthy."""
