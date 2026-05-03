@@ -1178,8 +1178,9 @@ async def register_route(request: Request):
     _save_routes_file(routes)
     global _routes_mtime
     _routes_mtime = 0
-    print(f"[router] registered {model} ({category}/{route_type}) -> {machine}:{port}")
-    return {"status": "ok"}
+    tmptext=f"[router] registered {model} ({category}/{route_type}) -> {machine}:{port}"
+    print(tmptext)
+    return {"status": tmptext}
 
 
 @app.post("/api/router/unregister")
