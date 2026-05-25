@@ -130,7 +130,7 @@ _bootstrap_admin()
 
 # Paths that don't need authentication
 _UNPROTECTED = {"/", "/api/auth/login", "/api/version"}
-_VALID_CATEGORIES = ("text", "audio", "tts", "ui", "ominithinker")
+_VALID_CATEGORIES = ("text", "audio", "tts", "ui", "ominithinker", "visionlang")
 _UNPROTECTED_PREFIXES = tuple(f"/{c}/" for c in _VALID_CATEGORIES) + ("/static/", "/api/router/")
 
 def _check_request_auth(request: Request) -> dict | None:
