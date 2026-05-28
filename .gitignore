@@ -1,7 +1,0 @@
-**/zzzjwmresources
-.venv/
-__pycache__/
-*.pyc
-agent/agent.log
-.secrets.json
-.DS_Store
