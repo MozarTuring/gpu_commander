@@ -7,6 +7,7 @@ import hmac as _hmac
 import json
 import secrets as _secrets
 import time
+import traceback
 from pathlib import Path
 
 import httpx
@@ -21,6 +22,12 @@ from config import load_config, AppConfig, MachineConfig, LLMIdleConfig
 cfg: AppConfig = load_config()
 
 app = FastAPI(title="GPU Commander Coordinator")
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    return JSONResponse(status_code=500, content={"detail": f"Internal error: {exc}"})
 
 # ---------------------------------------------------------------------------
 # Secrets (HF token etc.) — stored outside git in .secrets.json
