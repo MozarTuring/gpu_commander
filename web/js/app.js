@@ -397,9 +397,10 @@ async function loadLLMTab() {
 
     const accessHintHtml = `
         <div style="margin-bottom:12px; padding:12px 14px; background:var(--bg); border-radius:6px; border-left:3px solid var(--accent); font-family:var(--mono); font-size:11px; color:var(--text-mid); line-height:2">
-            <span style="color:var(--accent); font-family:var(--sans); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">How to access a running service</span><br>
-            <span style="color:var(--text-dim)">Direct:</span> ssh -f -N -L <span style="color:var(--accent)">&lt;local_port&gt;</span>:localhost:<span style="color:var(--accent)">&lt;remote_port&gt;</span> ${_currentUser?.stellar_account || '[stellar_account]'}@<span style="color:var(--accent)">&lt;machine_name&gt;</span>.stellar.research.liu.se<br>
-            <span style="color:var(--text-dim)">Proxy:</span> curl http://localhost:9800/<span style="color:var(--accent)">&lt;text|audio|ui&gt;</span>/v1/models
+            <span style="color:var(--accent); font-family:var(--sans); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">How to access a deployed model</span><br>
+            After deploying is done, it can be visited via <span style="color:var(--accent)">http://ferragon.stellar.research.liu.se:9800/&lt;what you select above&gt;</span><br>
+            <span style="color:var(--text-dim)">Example:</span> if you select <span style="color:var(--accent)">text/qwen3dot5-35b-a3b</span>, then: curl http://ferragon.stellar.research.liu.se:9800/text/qwen3dot5-35b-a3b/v1/models<br>
+            <span style="color:var(--text-dim)">More details:</span> <a href="https://gitlab.liu.se/jinma63/vllm_service/-/blob/jingwei/deployed_services.md?ref_type=heads" target="_blank" style="color:var(--accent)">deployed_services.md</a>
         </div>`;
 
     // Per-machine running services
@@ -423,7 +424,7 @@ async function loadLLMTab() {
         ${accessHintHtml}
         <div id="llm-tasks-body"><div class="empty-state">No deploying tasks</div></div>
     `;
-    grid.insertBefore(tasksPanel, deployPanel);
+    grid.insertBefore(tasksPanel, runningPanel);
     loadDeployTasks();
 
     // Restore previously selected model (survives poll refreshes)
