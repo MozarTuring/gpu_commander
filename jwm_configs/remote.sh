@@ -17,6 +17,7 @@ require_env() {
 
 # --- remote machine startup ---
 
+JWM_SERVER_NAME=greatrawr
 
 PROJ_DIR="${RUN_DIR_PRE}/${RUN_PROJ}"
 AGENT_DIR="${PROJ_DIR}/agent"
@@ -66,10 +67,18 @@ echo "Agent port: ${AGENT_PORT}"
 _coord_pids=$(pgrep -f 'uvicorn.*coordinator_server' 2>/dev/null || true)
 _agent_pids=$(pgrep -f 'uvicorn.*agent_server' 2>/dev/null || true)
 if [[ -n "$_coord_pids" ]]; then
-    pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || { echo "ERROR: cannot kill coordinator (PIDs: $_coord_pids) — owned by another user?"; return 1 2>/dev/null; exit 1; }
+    pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || {
+        echo "ERROR: cannot kill coordinator (PIDs: $_coord_pids) — owned by another user?"
+        return 1 2>/dev/null
+        exit 1
+    }
 fi
 if [[ -n "$_agent_pids" ]]; then
-    pkill -f 'uvicorn.*agent_server' 2>/dev/null || { echo "ERROR: cannot kill agent (PIDs: $_agent_pids) — owned by another user?"; return 1 2>/dev/null; exit 1; }
+    pkill -f 'uvicorn.*agent_server' 2>/dev/null || {
+        echo "ERROR: cannot kill agent (PIDs: $_agent_pids) — owned by another user?"
+        return 1 2>/dev/null
+        exit 1
+    }
 fi
 sleep 1
 
@@ -102,39 +111,21 @@ GPU_COMMANDER_TOKEN="${AUTH_TOKEN}" \
 AGENT_PID=$!
 echo "Agent started — PID: ${AGENT_PID}"
 
-wait_for_startup "Agent" agent.log || { return 1 2>/dev/null; exit 1; }
+wait_for_startup "Agent" agent.log || {
+    return 1 2>/dev/null
+    exit 1
+}
 
-# Start coordinator (only on the designated coordinator host)
-COORDINATOR_HOST=$(python3 -c "
-import yaml
-with open('${CONFIG_FILE}') as f:
-    cfg = yaml.safe_load(f)
-print(cfg.get('coordinator', {}).get('host_machine', ''))
-" 2>/dev/null || echo "")
+if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
+    cd "${PROJ_DIR}/coordinator"
+    GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
+        nohup "${VENV_DIR}/bin/python3" coordinator_server.py \
+        >>"${PROJ_DIR}/coordinator.log" 2>&1 &
+    echo "Coordinator started — PID: $!"
 
-if [[ -z "${COORDINATOR_HOST}" || "${SERVER_NAME}" != "${COORDINATOR_HOST}" ]]; then
-    echo "Skipping coordinator (not the coordinator host)"
-    return 0 2>/dev/null || exit 0
+    wait_for_startup "Coordinator" "${PROJ_DIR}/coordinator.log" || {
+        return 1 2>/dev/null
+        exit 1
+    }
 fi
-
-COORDINATOR_PORT=$(python3 -c "
-import yaml
-with open('${CONFIG_FILE}') as f:
-    cfg = yaml.safe_load(f)
-print(cfg.get('coordinator', {}).get('port', 9800))
-" 2>/dev/null || echo 9800)
-
-echo "Coordinator port: ${COORDINATOR_PORT}"
-
-cd "${PROJ_DIR}/coordinator"
->"${PROJ_DIR}/coordinator.log"
-GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
-    nohup "${VENV_DIR}/bin/python3" -m uvicorn coordinator_server:app --host 0.0.0.0 --port "${COORDINATOR_PORT}" \
-    >>"${PROJ_DIR}/coordinator.log" 2>&1 &
-echo "Coordinator started — PID: $!"
-
-wait_for_startup "Coordinator" "${PROJ_DIR}/coordinator.log" || { return 1 2>/dev/null; exit 1; }
-
-
-
 "${JWM_RUN_COMMAND[@]}"  > job_out.log 2>&1 &

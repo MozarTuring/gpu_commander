@@ -451,8 +451,9 @@ function renderDeployPanel(llmMachines) {
         return `<optgroup label="${cat.toUpperCase()}">${opts}</optgroup>`;
     }).join('');
 
+    const onlineMachines = llmMachines.filter(m => m.online);
     const machineOptions = `<option value="auto">Auto</option>` +
-        llmMachines.map(m => `<option value="${escapeHtml(m.name)}">${escapeHtml(displayName(m.name))}</option>`).join('');
+        onlineMachines.map(m => `<option value="${escapeHtml(m.name)}">${escapeHtml(displayName(m.name))}</option>`).join('');
 
     return `
         <h3 style="margin-bottom:14px">Deploy Model</h3>
