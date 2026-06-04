@@ -445,8 +445,8 @@ function renderDeployPanel(llmMachines) {
     const modelOptions = categories.map(cat => {
         const catModels = _llmModels.filter(m => (m.category || 'text') === cat);
         const opts = catModels.map(m => {
-            const tag = m.type === 'whisper' ? ` [whisper${m.language ? '·' + m.language : ''}]` : '';
-            return `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag} — ${escapeHtml(m.model)}</option>`;
+            const label = m.compose_dir || `${m.category || 'text'}/${m.name}`;
+            return `<option value="${escapeHtml(m.name)}">${escapeHtml(label)}</option>`;
         }).join('');
         return `<optgroup label="${cat.toUpperCase()}">${opts}</optgroup>`;
     }).join('');
