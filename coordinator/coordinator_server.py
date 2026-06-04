@@ -920,7 +920,9 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             })
             _save_deploy_records()
             return result
-    except HTTPException:
+    except HTTPException as exc:
+        if exc.status_code >= 500:
+            print(f"[DEPLOY ERROR] {exc.status_code}: {exc.detail}", flush=True)
         raise
     except Exception as exc:
         traceback.print_exc()

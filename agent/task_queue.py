@@ -41,7 +41,7 @@ class Task:
 
 
 class TaskQueue:
-    def __init__(self, persistence_dir: str = "/tmp/gpu_commander_tasks"):
+    def __init__(self, persistence_dir: str = os.path.join(os.path.expanduser("~"), "tmp", "gpu_commander_tasks")):
         self._tasks: dict[str, Task] = {}
         self._running_procs: dict[str, asyncio.subprocess.Process] = {}
         self._readopt_tasks: list[Task] = []
