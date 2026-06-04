@@ -4,7 +4,9 @@ import asyncio
 import os
 import platform
 import time
+from pathlib import Path
 
+import yaml
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -13,8 +15,16 @@ from typing import Optional
 from gpu_monitor import get_gpu_status
 from task_queue import TaskQueue
 
-AUTH_TOKEN = os.environ.get("GPU_COMMANDER_TOKEN", "gpu-commander-secret-change-me")
-AGENT_PORT = int(os.environ.get("GPU_COMMANDER_AGENT_PORT", "9850"))
+_CONFIG_PATH = os.environ.get(
+    "GPU_COMMANDER_CONFIG",
+    str(Path(__file__).resolve().parent.parent / "config.yaml"),
+)
+
+with open(_CONFIG_PATH) as _f:
+    _cfg = yaml.safe_load(_f)
+
+AUTH_TOKEN = _cfg.get("auth", {}).get("token", "gpu-commander-secret-change-me")
+AGENT_PORT = _cfg.get("agent_port", 9850)
 
 app = FastAPI(title="GPU Commander Agent")
 task_queue = TaskQueue()

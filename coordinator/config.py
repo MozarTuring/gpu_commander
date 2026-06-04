@@ -9,9 +9,9 @@ import yaml
 class MachineConfig:
     name: str
     host: str
-    agent_port: int
     ssh_alias: str
     remote_dir: str
+    agent_port: int = 9850
     description: str = ""
     vllm_service_dir: str = ""
 
@@ -67,7 +67,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
         machines[name] = MachineConfig(
             name=name,
             host=m["host"],
-            agent_port=m.get("agent_port", 9850),
+            agent_port=m.get("agent_port", raw.get("agent_port", 9850)),
             ssh_alias=m.get("ssh_alias", m["host"]),
             remote_dir=m.get("remote_dir", "/tmp/gpu_commander_agent"),
             description=m.get("description", ""),

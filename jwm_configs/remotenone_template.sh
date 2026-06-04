@@ -31,40 +31,20 @@ source "${VENV_DIR}/bin/activate"
 
 pip install -q fastapi 'uvicorn[standard]' pyyaml httpx python-multipart 2>&1 | tail -3
 
-AGENT_PORT=$(python3 -c "
-import yaml
-with open('${CONFIG_FILE}') as f:
-    cfg = yaml.safe_load(f)
-for name, m in cfg.get('machines', {}).items():
-    if name == '${SERVER_NAME}' or m.get('ssh_alias') == '${SERVER_NAME}':
-        print(m.get('agent_port', 9850))
-        break
-else:
-    print(9850)
-" 2>/dev/null || echo 9850)
-
-AUTH_TOKEN=$(python3 -c "
-import yaml
-with open('${CONFIG_FILE}') as f:
-    cfg = yaml.safe_load(f)
-print(cfg.get('auth', {}).get('token', 'gpu-commander-secret-change-me'))
-" 2>/dev/null || echo "gpu-commander-secret-change-me")
-
 echo "Agent dir:  ${AGENT_DIR}"
-echo "Agent port: ${AGENT_PORT}"
 
 # Kill old processes (fail if they exist but can't be killed, e.g. owned by another user)
-_coord_pids=$(pgrep -f 'uvicorn.*coordinator_server' 2>/dev/null || true)
-_agent_pids=$(pgrep -f 'uvicorn.*agent_server' 2>/dev/null || true)
+_coord_pids=$(pgrep -f 'python.*coordinator_server' 2>/dev/null || true)
+_agent_pids=$(pgrep -f 'python.*agent_server' 2>/dev/null || true)
 if [[ -n "$_coord_pids" ]]; then
-    pkill -f 'uvicorn.*coordinator_server' 2>/dev/null || {
+    pkill -f 'python.*coordinator_server' 2>/dev/null || {
         echo "ERROR: cannot kill coordinator (PIDs: $_coord_pids) — owned by another user?"
         return 1 2>/dev/null
         exit 1
     }
 fi
 if [[ -n "$_agent_pids" ]]; then
-    pkill -f 'uvicorn.*agent_server' 2>/dev/null || {
+    pkill -f 'python.*agent_server' 2>/dev/null || {
         echo "ERROR: cannot kill agent (PIDs: $_agent_pids) — owned by another user?"
         return 1 2>/dev/null
         exit 1
@@ -94,9 +74,8 @@ wait_for_startup() {
 # Start agent using the venv python
 cd "${AGENT_DIR}"
 >agent.log
-GPU_COMMANDER_TOKEN="${AUTH_TOKEN}" \
-    GPU_COMMANDER_AGENT_PORT="${AGENT_PORT}" \
-    nohup "${VENV_DIR}/bin/python3" -m uvicorn agent_server:app --host 0.0.0.0 --port "${AGENT_PORT}" \
+GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
+    nohup "${VENV_DIR}/bin/python3" agent_server.py \
     >>agent.log 2>&1 &
 AGENT_PID=$!
 echo "Agent started — PID: ${AGENT_PID}"
