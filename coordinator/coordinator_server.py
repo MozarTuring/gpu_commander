@@ -873,6 +873,7 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
                 wait_loop = ""
 
         compose_dir = model_cfg.get("compose_dir", req.model) if model_cfg else req.model
+        deploy_dir = f"{vd}/llm_services/{compose_dir}"
         force_build_export = 'export FORCE_BUILD=1 && ' if req.force_build else ''
         exports = (
             f'{force_build_export}'
@@ -882,15 +883,12 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
             f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
             f'export HF_TOKEN="{effective_hf}"'
         )
-        import os as _os
-        _run_dir_pre = str(_os.path.dirname(vd))
-        _vllm_proj = str(_os.path.basename(vd))
         cmd = (
             f"{wait_loop}{exports} && "
             f"export GPU_CMD_MACHINE_NAME={name} && "
             f"export GPU_CMD_COORDINATOR_URL=http://{'localhost' if name == cfg.coordinator.host_machine else cfg.machines[cfg.coordinator.host_machine].description}:{cfg.coordinator.port} && "
-            f"cd {_run_dir_pre} && "
-            f"bash -c 'source common_tools/meta_script.sh remote_docker_compose {_vllm_proj} local no_run_id {_run_dir_pre} {name}'"
+            f"cd {vd} && "
+            f"bash llm_services/{compose_dir}/remote.sh"
         )
         result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
         result["memory_insufficient"] = memory_insufficient
