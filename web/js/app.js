@@ -398,7 +398,7 @@ async function loadLLMTab() {
     const accessHintHtml = `
         <div style="margin-bottom:12px; padding:12px 14px; background:var(--bg); border-radius:6px; border-left:3px solid var(--accent); font-family:var(--mono); font-size:11px; color:var(--text-mid); line-height:2">
             <span style="color:var(--accent); font-family:var(--sans); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:600">How to access a deployed model</span><br>
-            After deploying is done, it can be visited via <span style="color:var(--accent)">http://ferragon.stellar.research.liu.se:9800/&lt;what you select above&gt;</span><br>
+            After model deploying is completed, (if you are using stellar network)it can be visited via <span style="color:var(--accent)">http://ferragon.stellar.research.liu.se:9800/&lt;what you select above&gt;</span><br>
             <span style="color:var(--text-dim)">Example:</span> if you select <span style="color:var(--accent)">text/qwen3dot5-35b-a3b</span>, then: curl http://ferragon.stellar.research.liu.se:9800/text/qwen3dot5-35b-a3b/v1/models<br>
             <span style="color:var(--text-dim)">More details:</span> <a href="https://gitlab.liu.se/jinma63/vllm_service/-/blob/jingwei/deployed_services.md?ref_type=heads" target="_blank" style="color:var(--accent)">deployed_services.md</a>
         </div>`;
@@ -555,14 +555,17 @@ function updateMachineTable(llmMachines) {
     }
 
     const alreadyEl = document.getElementById('llm-already-running');
+    const deployBtn = document.getElementById('llm-deploy-btn');
     if (alreadyEl) {
         if (alreadyRunning) {
             const owner = alreadyRunning.container.owner;
             alreadyEl.style.display = 'block';
             alreadyEl.innerHTML = `Already running on <strong>${escapeHtml(displayName(alreadyRunning.machine))}</strong>`
                 + (owner ? ` · deployed by <strong>${escapeHtml(owner)}</strong>` : '');
+            if (deployBtn) { deployBtn.disabled = true; deployBtn.title = 'Model is already running'; }
         } else {
             alreadyEl.style.display = 'none';
+            if (deployBtn) { deployBtn.disabled = false; deployBtn.title = ''; }
         }
     }
 
