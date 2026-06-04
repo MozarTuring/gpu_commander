@@ -780,145 +780,151 @@ async def get_my_deploy_tasks(user: dict = Depends(require_auth)):
 
 @app.post("/api/machines/{name}/llm/deploy")
 async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depends(require_auth)):
-    m = _get_machine(name)
-    vd = _require_vllm(m)
+    try:
+        m = _get_machine(name)
+        vd = _require_vllm(m)
 
-    # Serialize deploys per machine: prevents two concurrent requests both
-    # seeing "enough memory" and racing to deploy on the same GPU
-    if name not in _deploy_locks:
-        _deploy_locks[name] = asyncio.Lock()
-    async with _deploy_locks[name]:
+        # Serialize deploys per machine: prevents two concurrent requests both
+        # seeing "enough memory" and racing to deploy on the same GPU
+        if name not in _deploy_locks:
+            _deploy_locks[name] = asyncio.Lock()
+        async with _deploy_locks[name]:
 
-        # Fetch model config
-        all_models = _read_llm_models(vd)
-        model_cfg = next((x for x in all_models if x["name"] == req.model), None)
-        is_whisper = model_cfg.get("type") == "whisper" if model_cfg else False
+            # Fetch model config
+            all_models = _read_llm_models(vd)
+            model_cfg = next((x for x in all_models if x["name"] == req.model), None)
+            is_whisper = model_cfg.get("type") == "whisper" if model_cfg else False
 
-        users = _load_users()
-        user_hf = users.get(user["username"], {}).get("hf_token", "")
-        effective_hf = user_hf or _hf_token
-        if not effective_hf:
-            raise HTTPException(
-                status_code=400,
-                detail="No HuggingFace token configured. Set your HF token in your profile before deploying.",
-            )
+            users = _load_users()
+            user_hf = users.get(user["username"], {}).get("hf_token", "")
+            effective_hf = user_hf or _hf_token
+            if not effective_hf:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No HuggingFace token configured. Set your HF token in your profile before deploying.",
+                )
 
-        gpu_status = _gpu_cache.get(name)
-        gpus = gpu_status.get("gpus", []) if gpu_status else []
+            gpu_status = _gpu_cache.get(name)
+            gpus = gpu_status.get("gpus", []) if gpu_status else []
 
-        if is_whisper:
-            # Whisper: no GPU selection or memory check needed
-            which_gpu = 0
-            memory_insufficient = False
-            wait_loop = ""
-        else:
-            # Search all machines for the best available GPU (no ongoing deploy + most free memory)
-            best = None  # (machine_name, machine_obj, gpu_idx, free_mib, vllm_dir)
-            machines_to_check = [(name, m, vd)]  # prefer the requested machine first
-            for alt_name, alt_m in cfg.machines.items():
-                if alt_name != name and alt_m.vllm_service_dir and _machine_online.get(alt_name):
-                    alt_vd = alt_m.vllm_service_dir
-                    machines_to_check.append((alt_name, alt_m, alt_vd))
+            if is_whisper:
+                # Whisper: no GPU selection or memory check needed
+                which_gpu = 0
+                memory_insufficient = False
+                wait_loop = ""
+            else:
+                # Search all machines for the best available GPU (no ongoing deploy + most free memory)
+                best = None  # (machine_name, machine_obj, gpu_idx, free_mib, vllm_dir)
+                machines_to_check = [(name, m, vd)]  # prefer the requested machine first
+                for alt_name, alt_m in cfg.machines.items():
+                    if alt_name != name and alt_m.vllm_service_dir and _machine_online.get(alt_name):
+                        alt_vd = alt_m.vllm_service_dir
+                        machines_to_check.append((alt_name, alt_m, alt_vd))
 
-            for mname, mobj, mvd in machines_to_check:
-                mgpus = (_gpu_cache.get(mname) or {}).get("gpus", [])
-                if not mgpus:
-                    continue
-                # Find reserved GPUs on this machine
-                reserved = set()
-                try:
-                    list_cmd = "docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true"
-                    res = await _agent_request(mobj, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
-                    for line in res.get("stdout", "").splitlines():
-                        parts = line.strip().split("\t", 1)
-                        if len(parts) < 2:
-                            continue
-                        cname, cstatus = parts[0].strip(), parts[1].strip()
-                        if "health: starting" in cstatus:
-                            rec = next((r for r in reversed(_deploy_records) if r["machine"] == mname and r["container"] == cname), None)
-                            if rec and "which_gpu" in rec:
-                                reserved.add(int(rec["which_gpu"]))
-                except Exception:
-                    pass
-                for rec in _deploy_records:
-                    if rec["machine"] != mname or "which_gpu" not in rec:
+                for mname, mobj, mvd in machines_to_check:
+                    mgpus = (_gpu_cache.get(mname) or {}).get("gpus", [])
+                    if not mgpus:
                         continue
+                    # Find reserved GPUs on this machine
+                    reserved = set()
                     try:
-                        task = await _agent_request(mobj, "GET", f"/tasks/{rec['task_id']}", timeout=5)
-                        if task.get("status") in ("queued", "running"):
-                            reserved.add(int(rec["which_gpu"]))
+                        list_cmd = "docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true"
+                        res = await _agent_request(mobj, "POST", "/execute", json_body={"command": list_cmd, "timeout": 10})
+                        for line in res.get("stdout", "").splitlines():
+                            parts = line.strip().split("\t", 1)
+                            if len(parts) < 2:
+                                continue
+                            cname, cstatus = parts[0].strip(), parts[1].strip()
+                            if "health: starting" in cstatus:
+                                rec = next((r for r in reversed(_deploy_records) if r["machine"] == mname and r["container"] == cname), None)
+                                if rec and "which_gpu" in rec:
+                                    reserved.add(int(rec["which_gpu"]))
                     except Exception:
                         pass
+                    for rec in _deploy_records:
+                        if rec["machine"] != mname or "which_gpu" not in rec:
+                            continue
+                        try:
+                            task = await _agent_request(mobj, "GET", f"/tasks/{rec['task_id']}", timeout=5)
+                            if task.get("status") in ("queued", "running"):
+                                reserved.add(int(rec["which_gpu"]))
+                        except Exception:
+                            pass
 
-                for i, gpu in enumerate(mgpus):
-                    if i in reserved:
-                        continue
-                    free = gpu["memory_free_mib"]
-                    if best is None or free > best[3]:
-                        best = (mname, mobj, i, free, mvd)
+                    for i, gpu in enumerate(mgpus):
+                        if i in reserved:
+                            continue
+                        free = gpu["memory_free_mib"]
+                        if best is None or free > best[3]:
+                            best = (mname, mobj, i, free, mvd)
 
-            if best is None:
-                raise HTTPException(status_code=409, detail="All GPUs on all machines have ongoing deploys. Wait for them to finish.")
+                if best is None:
+                    raise HTTPException(status_code=409, detail="All GPUs on all machines have ongoing deploys. Wait for them to finish.")
 
-            name, m, which_gpu, _, vd = best
-            gpus = (_gpu_cache.get(name) or {}).get("gpus", [])
+                name, m, which_gpu, _, vd = best
+                gpus = (_gpu_cache.get(name) or {}).get("gpus", [])
 
-            required_mib = None
-            if model_cfg and model_cfg.get("memory_utilization") and which_gpu < len(gpus):
-                required_mib = round(model_cfg["memory_utilization"] * gpus[which_gpu]["memory_total_mib"])
-            free_mib = gpus[which_gpu]["memory_free_mib"] if which_gpu < len(gpus) else None
-            memory_insufficient = required_mib is not None and free_mib is not None and free_mib < required_mib
-            if memory_insufficient:
-                wait_loop = (
-                    f'echo "Waiting for GPU {which_gpu} to have {required_mib} MiB free..."; '
-                    f'while true; do '
-                    f'  _free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i {which_gpu} | tr -d " "); '
-                    f'  if [ "${{_free}}" -ge {required_mib} ]; then '
-                    f'    echo "GPU memory ready: ${{_free}} MiB free"; break; '
-                    f'  fi; '
-                    f'  echo "Need {required_mib} MiB, have ${{_free}} MiB — retrying in 60s..."; sleep 60; '
-                    f'done && '
-                )
-            else:
-                wait_loop = ""
+                required_mib = None
+                if model_cfg and model_cfg.get("memory_utilization") and which_gpu < len(gpus):
+                    required_mib = round(model_cfg["memory_utilization"] * gpus[which_gpu]["memory_total_mib"])
+                free_mib = gpus[which_gpu]["memory_free_mib"] if which_gpu < len(gpus) else None
+                memory_insufficient = required_mib is not None and free_mib is not None and free_mib < required_mib
+                if memory_insufficient:
+                    wait_loop = (
+                        f'echo "Waiting for GPU {which_gpu} to have {required_mib} MiB free..."; '
+                        f'while true; do '
+                        f'  _free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i {which_gpu} | tr -d " "); '
+                        f'  if [ "${{_free}}" -ge {required_mib} ]; then '
+                        f'    echo "GPU memory ready: ${{_free}} MiB free"; break; '
+                        f'  fi; '
+                        f'  echo "Need {required_mib} MiB, have ${{_free}} MiB — retrying in 60s..."; sleep 60; '
+                        f'done && '
+                    )
+                else:
+                    wait_loop = ""
 
-        compose_dir = model_cfg.get("compose_dir", req.model) if model_cfg else req.model
-        deploy_dir = f"{vd}/llm_services/{compose_dir}"
-        force_build_export = 'export FORCE_BUILD=1 && ' if req.force_build else ''
-        exports = (
-            f'{force_build_export}'
-            f'export VLLM_SERVED_MODEL_NAME="{req.model}" && '
-            f'export MODEL_DIR="{compose_dir}" && '
-            f'export VLLM_WHICH_GPU={which_gpu} && '
-            f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
-            f'export HF_TOKEN="{effective_hf}"'
-        )
-        cmd = (
-            f"{wait_loop}{exports} && "
-            f"export GPU_CMD_MACHINE_NAME={name} && "
-            f"export GPU_CMD_COORDINATOR_URL=http://{'localhost' if name == cfg.coordinator.host_machine else cfg.machines[cfg.coordinator.host_machine].host}:{cfg.coordinator.port} && "
-            f"cd {vd} && "
-            f"bash llm_services/{compose_dir}/remote.sh"
-        )
-        result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
-        result["memory_insufficient"] = memory_insufficient
-        container_name = model_cfg.get("container_name", req.model) if model_cfg else req.model
-        category = model_cfg.get("category", "text") if model_cfg else "text"
-        _deploy_records.append({
-            "task_id": result["id"],
-            "machine": name,
-            "model": req.model,
-            "container": container_name,
-            "category": category,
-            "username": user["username"],
-            "submitted_at": time.time(),
-            "which_gpu": which_gpu,
-            "hf_token": effective_hf,
-            "compose_dir": compose_dir,
-            "vllm_service_dir": vd,
-        })
-        _save_deploy_records()
-        return result
+            compose_dir = model_cfg.get("compose_dir", req.model) if model_cfg else req.model
+            deploy_dir = f"{vd}/llm_services/{compose_dir}"
+            force_build_export = 'export FORCE_BUILD=1 && ' if req.force_build else ''
+            exports = (
+                f'{force_build_export}'
+                f'export VLLM_SERVED_MODEL_NAME="{req.model}" && '
+                f'export MODEL_DIR="{compose_dir}" && '
+                f'export VLLM_WHICH_GPU={which_gpu} && '
+                f'export HUGGING_FACE_HUB_TOKEN="{effective_hf}" && '
+                f'export HF_TOKEN="{effective_hf}"'
+            )
+            cmd = (
+                f"{wait_loop}{exports} && "
+                f"export GPU_CMD_MACHINE_NAME={name} && "
+                f"export GPU_CMD_COORDINATOR_URL=http://{'localhost' if name == cfg.coordinator.host_machine else cfg.machines[cfg.coordinator.host_machine].host}:{cfg.coordinator.port} && "
+                f"cd {vd} && "
+                f"bash llm_services/{compose_dir}/remote.sh"
+            )
+            result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
+            result["memory_insufficient"] = memory_insufficient
+            container_name = model_cfg.get("container_name", req.model) if model_cfg else req.model
+            category = model_cfg.get("category", "text") if model_cfg else "text"
+            _deploy_records.append({
+                "task_id": result["id"],
+                "machine": name,
+                "model": req.model,
+                "container": container_name,
+                "category": category,
+                "username": user["username"],
+                "submitted_at": time.time(),
+                "which_gpu": which_gpu,
+                "hf_token": effective_hf,
+                "compose_dir": compose_dir,
+                "vllm_service_dir": vd,
+            })
+            _save_deploy_records()
+            return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Deploy failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
