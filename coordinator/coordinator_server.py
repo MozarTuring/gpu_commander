@@ -899,7 +899,8 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
                 f"export GPU_CMD_MACHINE_NAME={name} && "
                 f"export GPU_CMD_COORDINATOR_URL=http://{'localhost' if name == cfg.coordinator.host_machine else cfg.machines[cfg.coordinator.host_machine].host}:{cfg.coordinator.port} && "
                 f"cd {vd} && "
-                f"bash llm_services/{compose_dir}/remote.sh"
+                f"bash llm_services/{compose_dir}/remote.sh && "
+                f"bash jwm_configs/remote_after_web.sh"
             )
             result = await _agent_request(m, "POST", "/tasks/submit", json_body={"command": cmd})
             result["memory_insufficient"] = memory_insufficient
