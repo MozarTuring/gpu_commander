@@ -24,13 +24,7 @@ VENV_DIR="${RUN_DIR_PRE}/.venvs/gpu_commander"
 
 # Pick config based on branch suffix: gpu_commander_main -> config.yaml, gpu_commander_dev -> config.dev.yaml
 _branch_suffix="${RUN_PROJ##*_}" # everything after last underscore
-if [[ "$_branch_suffix" == "main" ]]; then
-    CONFIG_FILE="${PROJ_DIR}/config.yaml"
-elif [[ -f "${PROJ_DIR}/config.${_branch_suffix}.yaml" ]]; then
-    CONFIG_FILE="${PROJ_DIR}/config.${_branch_suffix}.yaml"
-else
-    CONFIG_FILE="${PROJ_DIR}/config.yaml"
-fi
+CONFIG_FILE="${PROJ_DIR}/config.yaml"
 echo "Using config: ${CONFIG_FILE}"
 
 # Write deploy version so coordinator can serve it via /api/version
@@ -141,6 +135,6 @@ echo "Coordinator started — PID: $!"
 
 wait_for_startup "Coordinator" "${PROJ_DIR}/coordinator.log" || { return 1 2>/dev/null; exit 1; }
 
-if false; then
-    _coord_port=9800 && ssh -o ControlPath=none -f -N -L ${_coord_port}:localhost:${_coord_port} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes ferragon
-fi
+
+
+"${JWM_RUN_COMMAND[@]}"  > job_out.log 2>&1 &
