@@ -230,16 +230,19 @@ async def _agent_request(
     timeout: float = 30.0,
 ) -> dict:
     url = f"{machine.base_url}{path}"
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.request(
-            method, url, headers=_headers(), json=json_body, params=params
-        )
-        if resp.status_code >= 400:
-            raise HTTPException(
-                status_code=resp.status_code,
-                detail=resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.request(
+                method, url, headers=_headers(), json=json_body, params=params
             )
-        return resp.json()
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise HTTPException(status_code=502, detail=f"Agent on {machine.name} unreachable: {exc}")
+    if resp.status_code >= 400:
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail=resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
+        )
+    return resp.json()
 
 
 def _get_machine(name: str) -> MachineConfig:
@@ -886,7 +889,7 @@ async def deploy_llm_model(name: str, req: LLMDeployRequest, user: dict = Depend
         cmd = (
             f"{wait_loop}{exports} && "
             f"export GPU_CMD_MACHINE_NAME={name} && "
-            f"export GPU_CMD_COORDINATOR_URL=http://{'localhost' if name == cfg.coordinator.host_machine else cfg.machines[cfg.coordinator.host_machine].description}:{cfg.coordinator.port} && "
+            f"export GPU_CMD_COORDINATOR_URL=http://{'localhost' if name == cfg.coordinator.host_machine else cfg.machines[cfg.coordinator.host_machine].host}:{cfg.coordinator.port} && "
             f"cd {vd} && "
             f"bash llm_services/{compose_dir}/remote.sh"
         )
