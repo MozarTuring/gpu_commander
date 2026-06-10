@@ -187,7 +187,9 @@ _container_last_active: dict[str, float] = {}
 _idle_log: list[dict] = []  # recent auto-stop events
 
 # Deploy ownership: list of {task_id, machine, model, container, username, submitted_at}
-_DEPLOY_RECORDS_FILE = Path(__file__).resolve().parent.parent / "deploy_records.json"
+_persistent_data_dir = Path.home() / ".gpu_commander"
+_persistent_data_dir.mkdir(parents=True, exist_ok=True)
+_DEPLOY_RECORDS_FILE = _persistent_data_dir / "deploy_records.json"
 
 def _load_deploy_records() -> list[dict]:
     if _DEPLOY_RECORDS_FILE.exists():
@@ -1114,7 +1116,9 @@ async def _idle_checker_loop():
 # model_routes.json: { "model_name": [{"machine": "...", "host": "...", "port": 8007}, ...] }
 import os as _os
 _cfg_path = _os.environ.get("GPU_COMMANDER_CONFIG", str(Path(__file__).resolve().parent.parent / "config.yaml"))
-_routes_file = Path(_cfg_path).parent / "model_routes.json"
+_persistent_dir = Path.home() / ".gpu_commander"
+_persistent_dir.mkdir(parents=True, exist_ok=True)
+_routes_file = _persistent_dir / "model_routes.json"
 _routes_cache: dict[str, list[dict]] = {}
 _routes_mtime: float = 0
 _routes_rr_idx: dict[str, int] = {}
