@@ -1,9 +1,3 @@
-set -e
-
-# change the following based on your running preference
-export RUN_DIR_PRE="/home/jinma/project_remote_jwm"
-export RUN_PROJ="gpu_commander_jingwei"
-
 # GPU Commander — remote.sh
 # Sourced by meta_script.sh on the remote machine.
 # Expects: RUN_DIR_PRE, RUN_PROJ, JWM_COMMIT_ID_L, SERVER_NAME set by meta_script.sh
@@ -13,11 +7,10 @@ export RUN_PROJ="gpu_commander_jingwei"
 
 # --- remote machine startup ---
 
-JWM_SERVER_NAME=greatrawr
+JWM_SERVER_NAME=
 
-PROJ_DIR="${RUN_DIR_PRE}/${RUN_PROJ}"
+PROJ_DIR="${RUN_DIR_HOME}/project_remote_jwm/${RUN_PROJ}"
 AGENT_DIR="${PROJ_DIR}/agent"
-VENV_DIR="${RUN_DIR_PRE}/.venvs/gpu_commander"
 
 # Pick config based on branch suffix: gpu_commander_main -> config.yaml, gpu_commander_dev -> config.dev.yaml
 _branch_suffix="${RUN_PROJ##*_}" # everything after last underscore
@@ -26,14 +19,6 @@ echo "Using config: ${CONFIG_FILE}"
 
 # Write deploy version so coordinator can serve it via /api/version
 echo "${JWM_COMMIT_ID_L}" >"${PROJ_DIR}/version.txt"
-
-# Create/reuse venv and install deps
-if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
-    echo "Creating virtualenv at ${VENV_DIR}..."
-    rm -rf "${VENV_DIR}"
-    python3 -m venv "${VENV_DIR}"
-fi
-source "${VENV_DIR}/bin/activate"
 
 pip install -q fastapi 'uvicorn[standard]' pyyaml httpx python-multipart 2>&1 | tail -3
 
@@ -81,7 +66,7 @@ wait_for_startup() {
 cd "${AGENT_DIR}"
 >agent.log
 GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
-    nohup "${VENV_DIR}/bin/python3" agent_server.py \
+    nohup "python3" agent_server.py \
     >>agent.log 2>&1 &
 AGENT_PID=$!
 echo "Agent started — PID: ${AGENT_PID}"
@@ -94,7 +79,7 @@ wait_for_startup "Agent" agent.log || {
 if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
     cd "${PROJ_DIR}/coordinator"
     GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
-        nohup "${VENV_DIR}/bin/python3" coordinator_server.py \
+        nohup "python3" coordinator_server.py \
         >>"${PROJ_DIR}/coordinator.log" 2>&1 &
     echo "Coordinator started — PID: $!"
 
@@ -103,4 +88,3 @@ if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
         exit 1
     }
 fi
-"${JWM_RUN_COMMAND[@]}"  > job_out.log 2>&1 &

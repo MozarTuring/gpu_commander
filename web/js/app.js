@@ -1069,12 +1069,16 @@ function showSetupModal() {
     document.getElementById('setup-modal').style.display = 'flex';
     if (_currentUser?.stellar_account)
         document.getElementById('setup-stellar').value = _currentUser.stellar_account;
-    // Hide stellar field if already set, show only password change
     const needsStellar = !_currentUser?.stellar_account;
     const needsPassword = _currentUser?.must_change_password;
     document.getElementById('setup-stellar-group').style.display = needsStellar ? '' : 'none';
     document.getElementById('setup-password-group').style.display = needsPassword ? '' : 'none';
     document.getElementById('setup-password-confirm-group').style.display = needsPassword ? '' : 'none';
+}
+
+function skipSetup() {
+    document.getElementById('setup-modal').style.display = 'none';
+    startPolling();
 }
 
 async function saveProfile() {

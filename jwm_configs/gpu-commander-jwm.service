@@ -1,0 +1,13 @@
+[Unit]
+Description=GPU Commander JWM Remote Service
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=jinma
+WorkingDirectory=/home/jinma/project_remote_jwm/gpu_commander_jingwei
+ExecStart=/bin/bash jwm_configs/remote.sh
+
+[Install]
+WantedBy=multi-user.target

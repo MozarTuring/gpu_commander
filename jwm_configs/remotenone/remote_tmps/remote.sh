@@ -1,3 +1,27 @@
+set -e
+
+require_env() {
+for var in "$@"; do
+    if [ -z "${!var}" ]; then
+        echo "Error: $var is not set" >&2
+        exit 1
+    fi
+done
+}
+
+
+# change the following based on your running preference
+export RUN_DIR_HOME="/home/jinma"
+export RUN_PROJ="gpu_commander_jingwei"
+
+eval "$(${RUN_DIR_HOME}/miniconda3/bin/conda shell.bash hook)"
+if [ ! -d ${RUN_DIR_HOME}/jwmcondaenv/shared_cuda ]; then
+    conda create -y -p ${RUN_DIR_HOME}/jwmcondaenv/shared_cuda -c nvidia cuda-toolkit
+fi
+    export CUDA_HOME=${RUN_DIR_HOME}/jwmcondaenv/shared_cuda
+    export PATH=${CUDA_HOME}/bin:${PATH}
+    export CPATH=${CUDA_HOME}/targets/x86_64-linux/include:${CPATH}
+    export LD_LIBRARY_PATH=${CUDA_HOME}/targets/x86_64-linux/lib:${LD_LIBRARY_PATH}
 # GPU Commander — remote.sh
 # Sourced by meta_script.sh on the remote machine.
 # Expects: RUN_DIR_PRE, RUN_PROJ, JWM_COMMIT_ID_L, SERVER_NAME set by meta_script.sh
@@ -7,11 +31,10 @@
 
 # --- remote machine startup ---
 
-JWM_SERVER_NAME=
+JWM_SERVER_NAME=greatrawr
 
-PROJ_DIR="${RUN_DIR_PRE}/${RUN_PROJ}"
+PROJ_DIR="${RUN_DIR_HOME}/project_remote_jwm/${RUN_PROJ}"
 AGENT_DIR="${PROJ_DIR}/agent"
-VENV_DIR="${RUN_DIR_PRE}/.venvs/gpu_commander"
 
 # Pick config based on branch suffix: gpu_commander_main -> config.yaml, gpu_commander_dev -> config.dev.yaml
 _branch_suffix="${RUN_PROJ##*_}" # everything after last underscore
@@ -20,14 +43,6 @@ echo "Using config: ${CONFIG_FILE}"
 
 # Write deploy version so coordinator can serve it via /api/version
 echo "${JWM_COMMIT_ID_L}" >"${PROJ_DIR}/version.txt"
-
-# Create/reuse venv and install deps
-if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
-    echo "Creating virtualenv at ${VENV_DIR}..."
-    rm -rf "${VENV_DIR}"
-    python3 -m venv "${VENV_DIR}"
-fi
-source "${VENV_DIR}/bin/activate"
 
 pip install -q fastapi 'uvicorn[standard]' pyyaml httpx python-multipart 2>&1 | tail -3
 
@@ -75,7 +90,7 @@ wait_for_startup() {
 cd "${AGENT_DIR}"
 >agent.log
 GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
-    nohup "${VENV_DIR}/bin/python3" agent_server.py \
+    nohup "python3" agent_server.py \
     >>agent.log 2>&1 &
 AGENT_PID=$!
 echo "Agent started — PID: ${AGENT_PID}"
@@ -88,7 +103,7 @@ wait_for_startup "Agent" agent.log || {
 if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
     cd "${PROJ_DIR}/coordinator"
     GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
-        nohup "${VENV_DIR}/bin/python3" coordinator_server.py \
+        nohup "python3" coordinator_server.py \
         >>"${PROJ_DIR}/coordinator.log" 2>&1 &
     echo "Coordinator started — PID: $!"
 
@@ -97,3 +112,12 @@ if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
         exit 1
     }
 fi
+echo ${PWD}
+echo ${JWM_RUN_COMMAND}
+if [[ ${notebook_flag} == 1 ]]; then
+    kill $(pgrep -f "port=18889")
+    sleep 5
+    JWM_RUN_COMMAND="jupyter labextension disable '@jupyterlab/apputils-extension:announcements' && jupyter lab --ip=0.0.0.0 --port=18889 --no-browser --allow-root --NotebookApp.token=''"
+fi
+nohup bash -c "${JWM_RUN_COMMAND}"  > jwmlogs/${JWM_RUN_START_TIME}/job_out.log 2>&1 &
+export JWM_JOB_ID=$!

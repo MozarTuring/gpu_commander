@@ -7,7 +7,7 @@
 
 # --- remote machine startup ---
 
-JWM_SERVER_NAME=ferragon
+JWM_SERVER_NAME=greatrawr
 
 PROJ_DIR="${RUN_DIR_PRE}/${RUN_PROJ}"
 AGENT_DIR="${PROJ_DIR}/agent"
