@@ -935,7 +935,7 @@ function updateUserDisplay() {
     badge.textContent = `${_currentUser.username} · ${_currentUser.role}`;
     menu.style.display = 'flex';
 
-    const adminOnly = ['overview', 'execute', 'tasks'];
+    const adminOnly = ['execute', 'tasks'];
     adminOnly.forEach(tab => {
         const btn = document.querySelector(`.tab[data-tab="${tab}"]`);
         if (btn) btn.style.display = _currentUser.role === 'admin' ? '' : 'none';
