@@ -590,7 +590,7 @@ function renderRunningSection(m) {
                     idleHtml = `<span style="color:${color}; font-size:12px">${idleMin}m idle · stops in ${stopInMin}m</span>`;
                 }
                 const isOwner = c.owner === _currentUser?.username;
-                const stopBtn = isOwner || _currentUser?.role === 'admin'
+                const stopBtn = isOwner
                     ? `<button class="cancel-btn" onclick="stopContainer('${escapeHtml(m.name)}','${escapeHtml(c.name)}')">Stop</button>`
                     : '';
                 return `<tr>

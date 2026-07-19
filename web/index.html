@@ -67,8 +67,6 @@
             <button class="tab active" data-tab="overview">Overview</button>
             <button class="tab" data-tab="llm">LLM Services</button>
             <button class="tab" data-tab="services">Services</button>
-            <button class="tab" data-tab="execute">Execute</button>
-            <button class="tab" data-tab="tasks">Task Queue</button>
             <button class="tab" data-tab="settings">Settings</button>
         </nav>
 
@@ -85,44 +83,6 @@
         <!-- Services Tab -->
         <div id="tab-services" class="tab-content">
             <div id="servicesGrid"></div>
-        </div>
-
-        <!-- Execute Tab -->
-        <div id="tab-execute" class="tab-content">
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-label">Execute Command</span>
-                </div>
-                <div class="cmd-row">
-                    <select id="cmdMachine"></select>
-                    <input type="text" id="cmdInput" placeholder="nvidia-smi" spellcheck="false">
-                    <button id="cmdRun">Run</button>
-                </div>
-                <div class="cmd-output" id="cmdOutput">Output will appear here...</div>
-            </div>
-        </div>
-
-        <!-- Task Queue Tab -->
-        <div id="tab-tasks" class="tab-content">
-            <div class="panel" style="margin-bottom:16px">
-                <div class="panel-header">
-                    <span class="panel-label">Submit Task</span>
-                </div>
-                <div class="cmd-row">
-                    <select id="taskMachine"></select>
-                    <input type="text" id="taskInput" placeholder="python train.py --epochs 100" spellcheck="false">
-                    <button id="taskSubmit">Submit</button>
-                </div>
-            </div>
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-label">Tasks</span>
-                    <select id="taskFilterMachine" class="filter-select"></select>
-                </div>
-                <div id="taskTableContainer">
-                    <div class="empty-state">No tasks yet</div>
-                </div>
-            </div>
         </div>
 
         <!-- Settings Tab -->
