@@ -16,7 +16,6 @@ document.querySelectorAll('.tab').forEach(btn => {
         document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
         if (btn.dataset.tab === 'llm') loadLLMTab();
         if (btn.dataset.tab === 'services') loadServicesTab();
-        if (btn.dataset.tab === 'tasks') loadTasks();
         if (btn.dataset.tab === 'settings') loadSettings();
     });
 });
@@ -61,8 +60,6 @@ function renderMachines(data) {
     machines = data;
     const grid = document.getElementById('machinesGrid');
     grid.innerHTML = '';
-
-    populateMachineSelects(data);
 
     data.forEach(m => {
         const card = document.createElement('div');
@@ -137,162 +134,9 @@ function renderMachines(data) {
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
     if (activeTab === 'llm') loadLLMTab();
     if (activeTab === 'services') loadServicesTab();
-    if (activeTab === 'tasks') loadTasks();
 }
 
 // ---------------------------------------------------------------------------
-// Populate machine dropdowns
-// ---------------------------------------------------------------------------
-function populateMachineSelects(data) {
-    const selectors = ['cmdMachine', 'taskMachine', 'taskFilterMachine'];
-    selectors.forEach(id => {
-        const el = document.getElementById(id);
-        const current = el.value;
-        const isFilter = id === 'taskFilterMachine';
-
-        el.innerHTML = isFilter ? '<option value="">All machines</option>' : '';
-        data.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m.name;
-            opt.textContent = `${displayName(m.name)}${m.online ? '' : ' (offline)'}`;
-            el.appendChild(opt);
-        });
-        if (current) el.value = current;
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Command execution
-// ---------------------------------------------------------------------------
-document.getElementById('cmdRun').addEventListener('click', runCommand);
-document.getElementById('cmdInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') runCommand();
-});
-
-async function runCommand() {
-    const machine = document.getElementById('cmdMachine').value;
-    const command = document.getElementById('cmdInput').value.trim();
-    const output = document.getElementById('cmdOutput');
-    const btn = document.getElementById('cmdRun');
-
-    if (!machine || !command) return;
-
-    btn.disabled = true;
-    output.innerHTML = '<span class="spinner"></span> Running...';
-
-    try {
-        const result = await api(`/api/machines/${machine}/execute`, {
-            method: 'POST',
-            body: JSON.stringify({ command, timeout: 300 }),
-        });
-
-        if (result.exit_code === 0) {
-            output.textContent = result.stdout || '(no output)';
-        } else {
-            output.innerHTML = `<span class="error">Exit code: ${result.exit_code}\n${escapeHtml(result.stderr)}</span>\n${escapeHtml(result.stdout)}`;
-        }
-    } catch (err) {
-        output.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
-    } finally {
-        btn.disabled = false;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Task queue
-// ---------------------------------------------------------------------------
-document.getElementById('taskSubmit').addEventListener('click', submitTask);
-document.getElementById('taskInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') submitTask();
-});
-
-async function submitTask() {
-    const machine = document.getElementById('taskMachine').value;
-    const command = document.getElementById('taskInput').value.trim();
-    if (!machine || !command) return;
-
-    const btn = document.getElementById('taskSubmit');
-    btn.disabled = true;
-
-    try {
-        await api(`/api/machines/${machine}/tasks/submit`, {
-            method: 'POST',
-            body: JSON.stringify({ command }),
-        });
-        document.getElementById('taskInput').value = '';
-        loadTasks();
-    } catch (err) {
-        alert('Failed to submit task: ' + err.message);
-    } finally {
-        btn.disabled = false;
-    }
-}
-
-async function loadTasks() {
-    const filterMachine = document.getElementById('taskFilterMachine').value;
-    const container = document.getElementById('taskTableContainer');
-
-    const machinesToQuery = filterMachine
-        ? [machines.find(m => m.name === filterMachine)].filter(Boolean)
-        : machines.filter(m => m.online);
-
-    if (machinesToQuery.length === 0) {
-        container.innerHTML = '<div class="empty-state">No online machines</div>';
-        return;
-    }
-
-    try {
-        const results = await Promise.allSettled(
-            machinesToQuery.map(async m => {
-                const tasks = await api(`/api/machines/${m.name}/tasks`);
-                return tasks
-                    .filter(t => _currentUser?.role === 'admin' || t.submitted_by === _currentUser?.username)
-                    .map(t => ({ ...t, machine: m.name }));
-            })
-        );
-
-        const allTasks = results
-            .filter(r => r.status === 'fulfilled')
-            .flatMap(r => r.value)
-            .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-
-        if (allTasks.length === 0) {
-            container.innerHTML = '<div class="empty-state">No tasks yet</div>';
-            return;
-        }
-
-        container.innerHTML = `<table class="task-table">
-            <thead><tr>
-                <th>ID</th><th>Machine</th><th>Command</th><th>Status</th><th>Created</th><th></th>
-            </tr></thead>
-            <tbody>
-                ${allTasks.map(t => `<tr>
-                    <td style="font-family:var(--mono); font-size:12px">${t.id}</td>
-                    <td>${displayName(t.machine)}</td>
-                    <td style="font-family:var(--mono); font-size:12px; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${escapeHtml(t.command)}</td>
-                    <td><span class="task-status ${t.status}">${t.status}</span></td>
-                    <td style="font-size:12px; color:var(--text-dim)">${t.created_at ? new Date(t.created_at * 1000).toLocaleString() : '—'}</td>
-                    <td>${(t.status === 'queued' || t.status === 'running') ? `<button class="cancel-btn" onclick="cancelTask('${t.machine}','${t.id}')">Cancel</button>` : ''}</td>
-                </tr>`).join('')}
-            </tbody>
-        </table>`;
-    } catch (err) {
-        container.innerHTML = `<div class="empty-state">Error loading tasks: ${escapeHtml(err.message)}</div>`;
-    }
-}
-
-async function cancelTask(machine, taskId) {
-    if (!confirm(`Cancel task ${taskId}?`)) return;
-    try {
-        await api(`/api/machines/${machine}/tasks/${taskId}`, { method: 'DELETE' });
-        loadTasks();
-    } catch (err) {
-        alert('Failed to cancel: ' + err.message);
-    }
-}
-
-document.getElementById('taskFilterMachine').addEventListener('change', loadTasks);
-
 // ---------------------------------------------------------------------------
 // Polling
 // ---------------------------------------------------------------------------
@@ -324,7 +168,6 @@ function startPolling(interval = 10000) {
         refresh();
         checkVersion();
         const activeTab = document.querySelector('.tab.active')?.dataset.tab;
-        if (activeTab === 'tasks') loadTasks();
         if (activeTab === 'llm') loadLLMTab();
         if (activeTab === 'services') loadServicesTab();
     }, interval);

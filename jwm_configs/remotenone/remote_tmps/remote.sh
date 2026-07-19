@@ -91,7 +91,7 @@ cd "${AGENT_DIR}"
 >agent.log
 GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
     nohup "python3" agent_server.py \
-    >>agent.log 2>&1 &
+    >agent.log 2>&1 &
 AGENT_PID=$!
 echo "Agent started — PID: ${AGENT_PID}"
 
@@ -104,7 +104,7 @@ if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
     cd "${PROJ_DIR}/coordinator"
     GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
         nohup "python3" coordinator_server.py \
-        >>"${PROJ_DIR}/coordinator.log" 2>&1 &
+        >"${PROJ_DIR}/coordinator.log" 2>&1 &
     echo "Coordinator started — PID: $!"
 
     wait_for_startup "Coordinator" "${PROJ_DIR}/coordinator.log" || {
