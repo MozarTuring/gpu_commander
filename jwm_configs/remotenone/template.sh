@@ -7,7 +7,6 @@
 
 # --- remote machine startup ---
 
-
 PROJ_DIR="${RUN_DIR_HOME}/project_remote_jwm/${RUN_PROJ}"
 AGENT_DIR="${PROJ_DIR}/agent"
 
@@ -77,8 +76,7 @@ cd -
 
 if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
     cd "${PROJ_DIR}/coordinator"
-    GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
-        nohup "python3" coordinator_server.py \
+    nohup "python3" coordinator_server.py --config ${CONFIG_FILE} \
         >"${PROJ_DIR}/coordinator.log" 2>&1 &
     echo "Coordinator started — PID: $!"
 

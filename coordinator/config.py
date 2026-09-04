@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from dataclasses import dataclass, field
 
@@ -45,10 +44,7 @@ class AppConfig:
 
 def load_config(config_path: str | None = None) -> AppConfig:
     if config_path is None:
-        config_path = os.environ.get(
-            "GPU_COMMANDER_CONFIG",
-            str(Path(__file__).resolve().parent.parent / "config.yaml"),
-        )
+        config_path = str(Path(__file__).resolve().parent.parent / "config.yaml")
     with open(config_path) as f:
         raw = yaml.safe_load(f)
 

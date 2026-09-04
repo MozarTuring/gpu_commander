@@ -1,7 +1,6 @@
 """GPU Commander Agent — FastAPI daemon running on each GPU machine."""
 
 import asyncio
-import os
 import platform
 import time
 from pathlib import Path
@@ -15,16 +14,8 @@ from typing import Optional
 from gpu_monitor import get_gpu_status
 from task_queue import TaskQueue
 
-_CONFIG_PATH = os.environ.get(
-    "GPU_COMMANDER_CONFIG",
-    str(Path(__file__).resolve().parent.parent / "config.yaml"),
-)
-
-with open(_CONFIG_PATH) as _f:
-    _cfg = yaml.safe_load(_f)
-
-AUTH_TOKEN = _cfg.get("auth", {}).get("token", "gpu-commander-secret-change-me")
-AGENT_PORT = _cfg.get("agent_port", 9850)
+AUTH_TOKEN: str = ""
+AGENT_PORT: int = 9850
 
 app = FastAPI(title="GPU Commander Agent")
 task_queue = TaskQueue()
@@ -208,6 +199,22 @@ async def startup():
 
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
+
+    _default_config = str(Path(__file__).resolve().parent.parent / "config.yaml")
+
+    parser = argparse.ArgumentParser(description="GPU Commander Agent")
+    parser.add_argument(
+        "--config", "-c",
+        default=_default_config,
+        help="Path to config.yaml (default: %(default)s)",
+    )
+    args = parser.parse_args()
+
+    with open(args.config) as _f:
+        _cfg = yaml.safe_load(_f)
+    AUTH_TOKEN = _cfg.get("auth", {}).get("token", "gpu-commander-secret-change-me")
+    AGENT_PORT = _cfg.get("agent_port", 9850)
 
     uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT)

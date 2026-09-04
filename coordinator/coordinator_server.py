@@ -1114,8 +1114,7 @@ async def _idle_checker_loop():
 # LLM Router — OpenAI-compatible proxy
 # ---------------------------------------------------------------------------
 # model_routes.json: { "model_name": [{"machine": "...", "host": "...", "port": 8007}, ...] }
-import os as _os
-_cfg_path = _os.environ.get("GPU_COMMANDER_CONFIG", str(Path(__file__).resolve().parent.parent / "config.yaml"))
+_cfg_path = str(Path(__file__).resolve().parent.parent / "config.yaml")
 _persistent_dir = Path.home() / ".gpu_commander"
 _persistent_dir.mkdir(parents=True, exist_ok=True)
 _routes_file = _persistent_dir / "model_routes.json"
@@ -1400,7 +1399,21 @@ async def startup():
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    import argparse
     import uvicorn
+
+    _default_config = str(Path(__file__).resolve().parent.parent / "config.yaml")
+
+    parser = argparse.ArgumentParser(description="GPU Commander Coordinator")
+    parser.add_argument(
+        "--config", "-c",
+        default=_default_config,
+        help="Path to config.yaml (default: %(default)s)",
+    )
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    _cfg_path = args.config
 
     uvicorn.run(
         app,
