@@ -7,7 +7,6 @@
 
 # --- remote machine startup ---
 
-JWM_SERVER_NAME=
 
 PROJ_DIR="${RUN_DIR_HOME}/project_remote_jwm/${RUN_PROJ}"
 AGENT_DIR="${PROJ_DIR}/agent"
