@@ -64,7 +64,6 @@ wait_for_startup() {
 
 # Start agent using the venv python
 cd "${AGENT_DIR}"
->agent.log
 GPU_COMMANDER_CONFIG="${CONFIG_FILE}" \
     nohup "python3" agent_server.py \
     >agent.log 2>&1 &
@@ -75,6 +74,7 @@ wait_for_startup "Agent" agent.log || {
     return 1 2>/dev/null
     exit 1
 }
+cd -
 
 if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
     cd "${PROJ_DIR}/coordinator"
@@ -87,4 +87,5 @@ if [[ ${JWM_SERVER_NAME} == "ferragon" ]]; then
         return 1 2>/dev/null
         exit 1
     }
+    cd -
 fi
