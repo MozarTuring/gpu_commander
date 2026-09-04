@@ -10,7 +10,7 @@
 
 # Pick config based on branch suffix: gpu_commander_main -> config.yaml, gpu_commander_dev -> config.dev.yaml
 # Write deploy version so coordinator can serve it via /api/version
-echo "${JWM_COMMIT_ID_L}" >"${PROJ_DIR}/version.txt"
+# echo "${JWM_COMMIT_ID_L}" >"${PROJ_DIR}/version.txt"
 
 
 
