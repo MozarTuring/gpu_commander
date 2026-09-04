@@ -7,20 +7,12 @@
 
 # --- remote machine startup ---
 
-PROJ_DIR="${RUN_DIR_HOME}/project_remote_jwm/${RUN_PROJ}"
-AGENT_DIR="${PROJ_DIR}/agent"
 
 # Pick config based on branch suffix: gpu_commander_main -> config.yaml, gpu_commander_dev -> config.dev.yaml
-_branch_suffix="${RUN_PROJ##*_}" # everything after last underscore
-CONFIG_FILE="${PROJ_DIR}/config.yaml"
-echo "Using config: ${CONFIG_FILE}"
-
 # Write deploy version so coordinator can serve it via /api/version
 echo "${JWM_COMMIT_ID_L}" >"${PROJ_DIR}/version.txt"
 
-pip install -q fastapi 'uvicorn[standard]' pyyaml httpx python-multipart 2>&1 | tail -3
 
-echo "Agent dir:  ${AGENT_DIR}"
 
 # Kill old processes (fail if they exist but can't be killed, e.g. owned by another user)
 _coord_pids=$(pgrep -f 'python.*coordinator_server' 2>/dev/null || true)
